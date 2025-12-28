@@ -86,6 +86,116 @@ const XIcon = ({ className }) => (
   </svg>
 );
 
+// --- GAME CONSTANTS & HELPERS ---
+const HP_MAX = 4;
+const DEFAULT_SEED = 1337421;
+const ITEMS_PER_ROUND = 2;
+const MAX_INVENTORY = 4;
+
+const ITEM_CONFIG = {
+  MAGNIFYING_GLASS: {
+    label: 'Magnifying Glass',
+    description: 'Reveal current shell',
+    weight: 0.25,
+    icon: <Search className="w-5 h-5" />
+  },
+  BEER: {
+    label: 'Beer',
+    description: 'Eject current shell',
+    weight: 0.25,
+    icon: <Beer className="w-5 h-5" />
+  },
+  HAND_SAW: {
+    label: 'Hand Saw',
+    description: 'Next shot deals double damage',
+    weight: 0.20,
+    icon: <SawIcon className="w-5 h-5" />
+  },
+  SKIP: {
+    label: 'Skip',
+    description: 'Opponent skips their next turn',
+    weight: 0.15,
+    icon: <SkipIcon className="w-5 h-5" />
+  },
+  CIGARETTES: {
+    label: 'Cigarettes',
+    description: 'Heal 1 HP',
+    weight: 0.15,
+    icon: <Cigarette className="w-5 h-5" />
+  }
+};
+
+const ACTOR_LABEL = {
+  player: 'YOU',
+  dealer: 'DEALER'
+};
+
+const freshKnowledge = () => ({
+  player: { currentShellKnown: false, knownCurrentShellType: null },
+  dealer: { currentShellKnown: false, knownCurrentShellType: null }
+});
+
+const freshStatus = () => ({
+  player: { skipTurnsRemaining: 0 },
+  dealer: { skipTurnsRemaining: 0 }
+});
+
+const freshTempEffects = () => ({
+  player: { doubleDamageNextShot: false },
+  dealer: { doubleDamageNextShot: false }
+});
+
+const pushTelemetry = (prevLog, messages) => {
+  const msgs = Array.isArray(messages) ? messages : [messages];
+  const combined = [...prevLog, ...msgs];
+  return combined.slice(Math.max(0, combined.length - 40));
+};
+
+const mulberry32 = (seed) => {
+  let t = seed >>> 0;
+  return () => {
+    t += 0x6D2B79F5;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+};
+
+const shuffleWith = (arr, rng) => {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+};
+
+const pickWeightedItem = (rng) => {
+  const roll = rng();
+  let sum = 0;
+  const entries = Object.values(ITEM_CONFIG);
+  const keys = Object.keys(ITEM_CONFIG);
+  for (let i = 0; i < entries.length; i++) {
+    sum += entries[i].weight;
+    if (roll <= sum) return keys[i];
+  }
+  return keys[keys.length - 1];
+};
+
+const buildItem = (kind, rng) => {
+  const cfg = ITEM_CONFIG[kind];
+  if (!cfg) return null;
+  return {
+    id: `itm-${Math.floor(rng() * 1_000_000_000)}`,
+    kind,
+    type: cfg.label,
+    icon: cfg.icon,
+    description: cfg.description
+  };
+};
+
+const clampHp = (hp) => Math.max(0, Math.min(HP_MAX, hp));
+
 // --- DEALER EYES COMPONENT ---
 const DealerEyes = () => {
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
@@ -155,52 +265,71 @@ const DealerEyes = () => {
 const App = () => {
   // --- CRYPTO / BETTING STATE ---
   const [cryptoState, setCryptoState] = useState({
-    balance: 1000.0, // Demo ETH/Token balance
+    balance: 1000.0,
     currentWager: 0,
     multiplier: 1.0,
-    phase: 'main_menu' // Changed initial phase to 'main_menu'
+    phase: 'main_menu'
   });
 
   // --- AUDIO STATE ---
   const [volume, setVolume] = useState(50);
   const [isMuted, setIsMuted] = useState(false);
 
-  const [gameState, setGameState] = useState({
-    round: 1,
-    dealerHealth: 4,
-    playerHealth: 4,
-    liveShells: 2,
-    blankShells: 2, // Balanced for demo
-    playerInventory: [
-      { id: 1, type: 'Cigarette', icon: <Cigarette className="w-5 h-5" />, description: 'Restores 1 HP' },
-      { id: 2, type: 'Beer', icon: <Beer className="w-5 h-5" />, description: 'Ejects current shell' },
-      { id: 3, type: 'Magnifier', icon: <Search className="w-5 h-5" />, description: 'Check current shell' },
-      { id: 7, type: 'Saw', icon: <SawIcon className="w-5 h-5" />, description: 'Double Damage' },
-    ],
-    dealerInventory: [
-      { id: 4, type: 'Saw', icon: <SawIcon className="w-5 h-5" />, description: 'Double damage' },
-    ],
+  const createInitialGameState = (seed = DEFAULT_SEED) => ({
+    round: 0,
+    dealerHealth: HP_MAX,
+    playerHealth: HP_MAX,
+    liveShells: 0,
+    blankShells: 0,
+    chamber: [],
+    currentShellIndex: 0,
+    playerInventory: [],
+    dealerInventory: [],
     log: ["System initialized.", "Waiting for wager..."],
+    statusEffects: freshStatus(),
+    tempEffects: freshTempEffects(),
+    knowledge: freshKnowledge(),
+    currentTurn: 'player',
+    matchOver: false,
+    seed
   });
+
+  const [gameState, setGameState] = useState(() => createInitialGameState());
 
   const [activeItem, setActiveItem] = useState(null);
   const [aimingAt, setAimingAt] = useState(null); 
   const [shotEffect, setShotEffect] = useState(null); 
   const [shell, setShell] = useState(null); 
-  
-  // Power-up States
   const [isSawedOff, setIsSawedOff] = useState(false);
-  const [dealerSkipped, setDealerSkipped] = useState(false); 
   const [scanningShell, setScanningShell] = useState(null); 
   const [effectOverlay, setEffectOverlay] = useState(null); 
   const [gameMousePos, setGameMousePos] = useState({ x: 0, y: 0 });
   const gameEyesRef = useRef(null);
+
+  const rngSeedRef = useRef(DEFAULT_SEED);
+  const rngRef = useRef(mulberry32(DEFAULT_SEED));
+
+  const reseed = (seedVal) => {
+    rngSeedRef.current = seedVal >>> 0;
+    rngRef.current = mulberry32(seedVal);
+  };
+
+  const random = () => rngRef.current();
+  const randomInt = (min, max) => Math.floor(random() * (max - min + 1)) + min;
 
   useEffect(() => {
     const handleMouseMove = (e) => setGameMousePos({ x: e.clientX, y: e.clientY });
     window.addEventListener('mousemove', handleMouseMove);
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
+
+  useEffect(() => {
+    if (cryptoState.phase !== 'playing') {
+      setShotEffect(null);
+      setEffectOverlay(null);
+      setShell(null);
+    }
+  }, [cryptoState.phase]);
 
   const calcDealerEyeOffset = (eyeOffsetX = 0) => {
     if (!gameEyesRef.current) return { x: 0, y: 0 };
@@ -215,49 +344,118 @@ const App = () => {
     return { x: Math.cos(angle) * dist, y: Math.sin(angle) * dist };
   };
 
-  const addLog = (msg) => {
+  const setTelemetry = (message) => {
     setGameState(prev => ({
       ...prev,
-      log: [msg, ...prev.log].slice(0, 5)
+      log: pushTelemetry(prev.log, message)
     }));
   };
 
   const triggerShell = (type, color = 'red') => {
-    const id = Date.now();
+    const id = `${rngSeedRef.current}-${Math.floor(random() * 1_000_000)}`;
     setShell({ type, id, color });
     setTimeout(() => {
       setShell(prev => (prev && prev.id === id ? null : prev));
     }, 800);
   };
 
-  // --- GAME LOGIC HELPERS ---
+  const resolveSkips = (statusEffects, desiredNext) => {
+    const updatedStatus = {
+      player: { ...statusEffects.player },
+      dealer: { ...statusEffects.dealer }
+    };
+    let next = desiredNext;
+    const telemetry = [];
+    let guard = 0;
+    while (updatedStatus[next].skipTurnsRemaining > 0 && guard < 4) {
+      updatedStatus[next].skipTurnsRemaining -= 1;
+      telemetry.push(`${ACTOR_LABEL[next]} turn skipped`);
+      next = next === 'player' ? 'dealer' : 'player';
+      guard += 1;
+    }
+    return { updatedStatus, nextTurn: next, telemetry };
+  };
+
+  const addItemsToInventory = (inventory, ownerKey, telemetry) => {
+    let updated = [...inventory];
+    for (let i = 0; i < ITEMS_PER_ROUND; i++) {
+      const kind = pickWeightedItem(random);
+      const item = buildItem(kind, random);
+      if (item) updated.push(item);
+    }
+    let discarded = 0;
+    while (updated.length > MAX_INVENTORY) {
+      const idx = Math.floor(random() * updated.length);
+      updated.splice(idx, 1);
+      discarded += 1;
+    }
+    if (discarded) telemetry.push(`${ACTOR_LABEL[ownerKey]} inventory full → discarded ${discarded}`);
+    return updated;
+  };
+
+  const startRoundFromState = (state, extraMessages = []) => {
+    const length = randomInt(2, 8);
+    const liveCount = randomInt(1, length - 1);
+    const blankCount = length - liveCount;
+    const chamber = shuffleWith(
+      [...Array(liveCount).fill('LIVE'), ...Array(blankCount).fill('BLANK')],
+      random
+    );
+    const telemetry = [
+      ...extraMessages,
+      `R${state.round + 1} START: ${length} shells (${liveCount} LIVE / ${blankCount} BLANK)`
+    ];
+
+    const playerInventory = addItemsToInventory(state.playerInventory, 'player', telemetry);
+    const dealerInventory = addItemsToInventory(state.dealerInventory, 'dealer', telemetry);
+    const { updatedStatus, nextTurn, telemetry: skipMessages } = resolveSkips(state.statusEffects, 'player');
+
+    return {
+      ...state,
+      round: state.round + 1,
+      chamber,
+      liveShells: liveCount,
+      blankShells: blankCount,
+      currentShellIndex: 0,
+      knowledge: freshKnowledge(),
+      playerInventory,
+      dealerInventory,
+      statusEffects: updatedStatus,
+      currentTurn: nextTurn,
+      log: pushTelemetry(state.log, [...telemetry, ...skipMessages])
+    };
+  };
+
+  const handleRoundExhausted = (state) => {
+    const telemetry = [`R${state.round} END: Reloading...`];
+    return startRoundFromState(state, telemetry);
+  };
 
   const handleStartGame = () => {
-    const wager = 1; // Fixed wager
+    const wager = 1;
     if (wager > cryptoState.balance) {
-      addLog("INSUFFICIENT FUNDS.");
+      setTelemetry("INSUFFICIENT FUNDS.");
       return;
     }
+    const seed = Math.floor((Date.now() ^ Math.floor(Math.random() * 1_000_000_000)) >>> 0);
+    reseed(seed);
+    const baseState = createInitialGameState(seed);
+    const nextState = startRoundFromState(baseState, [`MATCH INIT: seed ${seed}`]);
 
     setCryptoState(prev => ({
       ...prev,
       balance: prev.balance - wager,
       currentWager: wager,
-      multiplier: 1.2, // Starting multiplier
+      multiplier: 1.2,
       phase: 'playing'
     }));
     
-    setGameState(prev => ({
-        ...prev,
-        round: 1,
-        dealerHealth: 4,
-        playerHealth: 4,
-        log: ["Wager accepted.", "Good luck."]
-    }));
+    setGameState(nextState);
+    setIsSawedOff(false);
+    setShotEffect(null);
   };
 
   const handleCashOut = () => {
-    // Switch to success screen instead of immediately resetting
     setCryptoState(prev => ({
         ...prev,
         phase: 'withdrawal_success'
@@ -270,147 +468,349 @@ const App = () => {
         ...prev,
         balance: prev.balance + totalWin,
         currentWager: 0,
-        phase: 'main_menu', // UPDATED: Return to Main Menu
+        phase: 'main_menu',
         multiplier: 1.0
     }));
-    setGameState(prev => ({
-        ...prev, 
-        round: 1, 
-        dealerHealth: 4, 
-        playerHealth: 4,
-        log: ["Funds withdrawn.", "Session ended."]
-    }));
+    const seed = rngSeedRef.current;
+    const resetState = startRoundFromState(createInitialGameState(seed));
+    setGameState(resetState);
   };
 
   const handleContinue = () => {
-      // Increase difficulty and multiplier
       setCryptoState(prev => ({
           ...prev,
           multiplier: parseFloat((prev.multiplier + 0.5).toFixed(1)),
           phase: 'playing'
       }));
-
-      setGameState(prev => ({
-          ...prev,
-          round: prev.round + 1,
-          dealerHealth: Math.min(6, prev.round + 4), // Dealer gets tougher
-          playerHealth: 4, // Heal player
-          log: ["Contract extended.", "Multiplier increased."]
-      }));
+      setGameState(prev => startRoundFromState({
+        ...prev,
+        dealerHealth: HP_MAX,
+        playerHealth: HP_MAX,
+        matchOver: false
+      }, [`MATCH RESET: seed ${rngSeedRef.current}`]));
   };
 
-  const checkWinCondition = (newDealerHealth, newPlayerHealth) => {
-      if (newDealerHealth <= 0) {
-          setTimeout(() => setCryptoState(prev => ({ ...prev, phase: 'round_won' })), 1500);
-      } else if (newPlayerHealth <= 0) {
-          setTimeout(() => setCryptoState(prev => ({ ...prev, phase: 'game_over' })), 1500);
+  const concludeMatchIfNeeded = (state, telemetry) => {
+    let nextState = { ...state };
+    if (state.dealerHealth <= 0) {
+      nextState.matchOver = true;
+      telemetry.push("MATCH OVER: You win");
+      setCryptoState(prev => ({ ...prev, phase: 'round_won' }));
+    } else if (state.playerHealth <= 0) {
+      nextState.matchOver = true;
+      telemetry.push("MATCH OVER: Dealer wins");
+      setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
+    }
+    return nextState;
+  };
+
+  const resolveShot = (shooter, target) => {
+    setGameState(prev => {
+      if (cryptoState.phase !== 'playing' || prev.matchOver) return prev;
+      if (prev.currentTurn !== shooter) return prev;
+
+      if (!prev.chamber.length || prev.currentShellIndex >= prev.chamber.length) {
+        return handleRoundExhausted(prev);
       }
-  };
 
-  // --- ACTIONS ---
+      const shellType = prev.chamber[prev.currentShellIndex];
+      const isLive = shellType === 'LIVE';
+      const targetKey = target === 'player' ? 'playerHealth' : 'dealerHealth';
+      const opponent = shooter === 'player' ? 'dealer' : 'player';
+      const telemetry = [];
 
-  const handleShootSelf = () => {
-    if (cryptoState.phase !== 'playing') return;
+      const tempEffects = {
+        ...prev.tempEffects,
+        [shooter]: { ...prev.tempEffects[shooter], doubleDamageNextShot: false }
+      };
 
-    addLog("The barrel feels cold against your temple.");
-    setShotEffect('self');
-    
-    // Logic Sim: 50/50 chance for demo if no known shells
-    const isLive = Math.random() > 0.4; // Slightly safer for player in demo
-    const dmg = isLive ? (isSawedOff ? 2 : 1) : 0;
-    
-    triggerShell('self', isLive ? 'red' : 'white'); 
+      let damage = isLive ? 1 : 0;
+      if (isLive && prev.tempEffects[shooter]?.doubleDamageNextShot) {
+        damage = 2;
+      }
 
-    if (isLive) {
-        setGameState(prev => {
-            const newHealth = Math.max(0, prev.playerHealth - dmg);
-            checkWinCondition(prev.dealerHealth, newHealth);
-            return { ...prev, playerHealth: newHealth };
-        });
-        addLog("BANG. You took damage.");
-    } else {
-        addLog("Click. Safe.");
-    }
-    
-    setTimeout(() => {
+      const statusEffects = {
+        player: { ...prev.statusEffects.player },
+        dealer: { ...prev.statusEffects.dealer }
+      };
+
+      const knowledge = freshKnowledge();
+      const liveShells = isLive ? prev.liveShells - 1 : prev.liveShells;
+      const blankShells = !isLive ? prev.blankShells - 1 : prev.blankShells;
+      const currentShellIndex = prev.currentShellIndex + 1;
+
+      const newHp = clampHp(prev[targetKey] - damage);
+      let nextState = {
+        ...prev,
+        [targetKey]: newHp,
+        tempEffects,
+        statusEffects,
+        knowledge,
+        liveShells,
+        blankShells,
+        currentShellIndex
+      };
+
+      telemetry.push(
+        `${ACTOR_LABEL[shooter]}: Shoot ${ACTOR_LABEL[target]} -> ${isLive ? 'LIVE' : 'BLANK'}${isLive ? ` (-${damage}). ${ACTOR_LABEL[target]} HP ${newHp}` : ''}`
+      );
+
+      if (!isLive && shooter === target) {
+        nextState.statusEffects[opponent].skipTurnsRemaining += 1;
+        telemetry.push(`SELF BLANK: ${ACTOR_LABEL[opponent]} skips next turn`);
+      }
+
+      nextState = concludeMatchIfNeeded(nextState, telemetry);
+
+      if (!nextState.matchOver && currentShellIndex >= prev.chamber.length) {
+        nextState.log = pushTelemetry(prev.log, [...telemetry, `R${prev.round} END: Reloading...`]);
+        nextState = startRoundFromState(nextState);
+      } else {
+        const desiredNext = shooter === 'player' ? 'dealer' : 'player';
+        const { updatedStatus, nextTurn, telemetry: skipTelemetry } = resolveSkips(nextState.statusEffects, desiredNext);
+        nextState.statusEffects = updatedStatus;
+        nextState.currentTurn = nextState.matchOver ? prev.currentTurn : nextTurn;
+        nextState.log = pushTelemetry(prev.log, [...telemetry, ...skipTelemetry]);
+      }
+
+      const color = isLive ? 'red' : 'white';
+      triggerShell(target === 'dealer' ? 'dealer' : 'self', color);
+      setShotEffect(target === 'dealer' ? 'dealer' : (isLive ? 'self' : null));
+      setTimeout(() => {
         setShotEffect(null);
-        setIsSawedOff(false); // Reset saw after shot
-    }, 1000); 
+        if (shooter === 'player') setIsSawedOff(false);
+      }, 800);
+      return nextState;
+    });
   };
 
-  const handleShootDealer = () => {
-    if (cryptoState.phase !== 'playing') return;
+  const removeItemFromInventory = (inventory, id) => inventory.filter(it => it.id !== id);
 
-    addLog("The eyes widen as you point the weapon.");
-    setShotEffect('dealer');
-    
-    const isLive = Math.random() > 0.3; // 70% hit rate for demo fun
-    const dmg = isLive ? (isSawedOff ? 2 : 1) : 0;
+  const handleItemUse = (actor, item) => {
+    const opponent = actor === 'player' ? 'dealer' : 'player';
+    setGameState(prev => {
+      if (cryptoState.phase !== 'playing' || prev.matchOver) return prev;
+      if (prev.currentTurn !== actor) return prev;
 
-    triggerShell('dealer', isLive ? 'red' : 'white');
+      const telemetry = [];
+      const statusEffects = {
+        player: { ...prev.statusEffects.player },
+        dealer: { ...prev.statusEffects.dealer }
+      };
+      const tempEffects = {
+        ...prev.tempEffects,
+        [actor]: { ...prev.tempEffects[actor] }
+      };
+      let knowledge = { ...prev.knowledge };
+      let liveShells = prev.liveShells;
+      let blankShells = prev.blankShells;
+      let currentShellIndex = prev.currentShellIndex;
+      let playerHealth = prev.playerHealth;
+      let dealerHealth = prev.dealerHealth;
+      let keepTurn = false;
 
-    if (isLive) {
-        setGameState(prev => {
-            const newHealth = Math.max(0, prev.dealerHealth - dmg);
-            checkWinCondition(newHealth, prev.playerHealth);
-            return { ...prev, dealerHealth: newHealth };
-        });
-        addLog("Hit. The dealer flinches.");
-    } else {
-        addLog("Click. A blank.");
-    }
+      const applyInventory = (key) => {
+        if (key === 'player') {
+          return removeItemFromInventory(prev.playerInventory, item.id);
+        }
+        return removeItemFromInventory(prev.dealerInventory, item.id);
+      };
 
-    setTimeout(() => {
-        setShotEffect(null);
-        setIsSawedOff(false); // Reset saw
-    }, 1000); 
+      let playerInventory = prev.playerInventory;
+      let dealerInventory = prev.dealerInventory;
+      if (actor === 'player') {
+        playerInventory = applyInventory('player');
+      } else {
+        dealerInventory = applyInventory('dealer');
+      }
+
+      const remainingShells = prev.chamber.length - prev.currentShellIndex;
+      const currentShellType = prev.chamber[prev.currentShellIndex];
+
+      switch (item.kind) {
+        case 'CIGARETTES': {
+          const isPlayer = actor === 'player';
+          const newHp = clampHp(isPlayer ? playerHealth + 1 : dealerHealth + 1);
+          if (isPlayer) {
+            playerHealth = newHp;
+            setEffectOverlay('smoke');
+            setTimeout(() => setEffectOverlay(null), 1500);
+          } else {
+            dealerHealth = newHp;
+          }
+          telemetry.push(`${ACTOR_LABEL[actor]}: Cigarettes → HP ${newHp}`);
+          break;
+        }
+        case 'HAND_SAW': {
+          tempEffects[actor].doubleDamageNextShot = true;
+          telemetry.push(`${ACTOR_LABEL[actor]}: Hand Saw primed`);
+          if (actor === 'player') {
+            setEffectOverlay('sawing');
+            setTimeout(() => setEffectOverlay(null), 1200);
+            setIsSawedOff(true);
+          }
+          break;
+        }
+        case 'MAGNIFYING_GLASS': {
+          if (remainingShells <= 0) {
+            telemetry.push(`${ACTOR_LABEL[actor]}: Chamber empty`);
+          } else {
+            knowledge = {
+              ...knowledge,
+              [actor]: {
+                currentShellKnown: true,
+                knownCurrentShellType: currentShellType
+              }
+            };
+            telemetry.push(`${ACTOR_LABEL[actor]}: Glass → ${currentShellType}`);
+            setScanningShell(currentShellType === 'LIVE' ? 'live' : 'blank');
+            setTimeout(() => setScanningShell(null), 1500);
+          }
+          break;
+        }
+        case 'BEER': {
+          if (remainingShells <= 0) {
+            telemetry.push(`${ACTOR_LABEL[actor]}: Beer wasted (empty)`);
+          } else {
+            const isLive = currentShellType === 'LIVE';
+            liveShells = isLive ? prev.liveShells - 1 : prev.liveShells;
+            blankShells = !isLive ? prev.blankShells - 1 : prev.blankShells;
+            currentShellIndex = prev.currentShellIndex + 1;
+            knowledge = freshKnowledge();
+            const shellsLeft = prev.chamber.length - currentShellIndex;
+            telemetry.push(`${ACTOR_LABEL[actor]}: Beer → racked a shell (${shellsLeft} left)`);
+            triggerShell('side', isLive ? 'red' : 'white');
+          }
+          keepTurn = true;
+          break;
+        }
+        case 'SKIP': {
+          statusEffects[opponent].skipTurnsRemaining += 1;
+          telemetry.push(`${ACTOR_LABEL[actor]}: Skip → ${ACTOR_LABEL[opponent]} loses a turn`);
+          break;
+        }
+        default:
+          break;
+      }
+
+      let nextState = {
+        ...prev,
+        playerInventory,
+        dealerInventory,
+        statusEffects,
+        tempEffects,
+        knowledge,
+        liveShells,
+        blankShells,
+        currentShellIndex,
+        playerHealth,
+        dealerHealth
+      };
+
+      if (currentShellIndex >= prev.chamber.length && prev.chamber.length > 0) {
+        nextState.log = pushTelemetry(prev.log, [...telemetry, `R${prev.round} END: Reloading...`]);
+        nextState = startRoundFromState(nextState);
+        nextState.currentTurn = 'player';
+        return nextState;
+      }
+
+      const desiredNext = keepTurn ? actor : (actor === 'player' ? 'dealer' : 'player');
+      const { updatedStatus, nextTurn, telemetry: skipTelemetry } = resolveSkips(statusEffects, desiredNext);
+      nextState.statusEffects = updatedStatus;
+      nextState.currentTurn = nextTurn;
+      nextState.log = pushTelemetry(prev.log, [...telemetry, ...skipTelemetry]);
+      return nextState;
+    });
   };
 
+  const handleShootSelf = () => resolveShot('player', 'player');
+  const handleShootDealer = () => resolveShot('player', 'dealer');
   const handleUseItem = (item) => {
-     if (cryptoState.phase !== 'playing') return;
-     
-     if (item.type === 'Cigarette') {
-         setEffectOverlay('smoke');
-         // Animate health up
-         setTimeout(() => {
-             setGameState(prev => ({...prev, playerHealth: Math.min(prev.playerHealth + 1, 4)}));
-         }, 1000);
-         // Smoke persists longer
-         setTimeout(() => setEffectOverlay(null), 3000);
-     }
-     
-     if (item.type === 'Saw') {
-         if (isSawedOff) {
-             addLog("Already sawed off.");
-             return;
-         }
-         // Start sawing animation
-         setEffectOverlay('sawing');
-         // Apply effect AFTER animation
-         setTimeout(() => {
-             setIsSawedOff(true);
-             setEffectOverlay(null);
-             addLog("Barrel shortened.");
-         }, 1500);
-     }
-     
-     if (item.type === 'Beer') {
-         const isLive = Math.random() > 0.5; // Simulate checking actual shell
-         // Eject shell - pass color to trigger visual
-         triggerShell('side', isLive ? 'red' : 'white'); 
-         addLog(isLive ? "Live shell ejected." : "Blank shell ejected.");
-     }
-
-     if (item.type === 'Magnifier') {
-         const isLive = Math.random() > 0.5;
-         addLog("Checking chamber...");
-         setScanningShell(isLive ? 'live' : 'blank');
-         setTimeout(() => {
-             setScanningShell(null);
-             addLog(isLive ? "It's RED." : "It's GREY.");
-         }, 2000);
-     }
+    if (!item) return;
+    handleItemUse('player', item);
   };
+
+  const dealerTakeTurn = () => {
+    const state = gameState;
+    if (cryptoState.phase !== 'playing' || state.matchOver) return;
+    if (state.currentTurn !== 'dealer') return;
+
+    const remaining = state.chamber.length - state.currentShellIndex;
+    if (remaining <= 0) {
+      setGameState(prev => handleRoundExhausted(prev));
+      return;
+    }
+
+    const findItem = (kind) => state.dealerInventory.find(it => it.kind === kind);
+    const useItem = (kind) => {
+      const item = findItem(kind);
+      if (item) {
+        handleItemUse('dealer', item);
+        return true;
+      }
+      return false;
+    };
+
+    const knownShell = state.knowledge.dealer.currentShellKnown ? state.knowledge.dealer.knownCurrentShellType : null;
+    const pLive = remaining > 0 ? state.liveShells / remaining : 0;
+
+    if (state.dealerHealth <= 1 && useItem('CIGARETTES')) return;
+    if (!knownShell && useItem('MAGNIFYING_GLASS')) return;
+
+    if (knownShell === 'BLANK') {
+      if (random() < 0.6) {
+        resolveShot('dealer', 'dealer');
+      } else {
+        resolveShot('dealer', 'player');
+      }
+      return;
+    }
+
+    if (knownShell === 'LIVE') {
+      if (state.playerHealth <= 2 && useItem('HAND_SAW')) return;
+      resolveShot('dealer', 'player');
+      return;
+    }
+
+    if (pLive > 0.6 && state.dealerHealth <= 2 && useItem('BEER')) return;
+
+    if (random() < 0.15 && useItem('SKIP')) return;
+
+    const chooseSelf = (random() < 0.1 ? random() < 0.5 : pLive < 0.5);
+    resolveShot('dealer', chooseSelf ? 'dealer' : 'player');
+  };
+
+  useEffect(() => {
+    if (cryptoState.phase !== 'playing') return;
+    if (gameState.matchOver) return;
+    if (gameState.currentTurn !== 'dealer') return;
+
+    if (gameState.statusEffects.dealer.skipTurnsRemaining > 0) {
+      setGameState(prev => {
+        const updatedStatus = {
+          player: { ...prev.statusEffects.player },
+          dealer: { ...prev.statusEffects.dealer, skipTurnsRemaining: Math.max(0, prev.statusEffects.dealer.skipTurnsRemaining - 1) }
+        };
+        return {
+          ...prev,
+          statusEffects: updatedStatus,
+          currentTurn: 'player',
+          log: pushTelemetry(prev.log, `${ACTOR_LABEL.dealer} turn skipped`)
+        };
+      });
+      return;
+    }
+
+    const timer = setTimeout(() => dealerTakeTurn(), 2000);
+    return () => clearTimeout(timer);
+  }, [
+    gameState.currentTurn,
+    gameState.statusEffects.dealer.skipTurnsRemaining,
+    gameState.matchOver,
+    gameState.chamber.length,
+    gameState.currentShellIndex,
+    cryptoState.phase
+  ]);
 
   // Helper to determine gun transform class
   const getGunContainerClass = () => {
@@ -1090,13 +1490,16 @@ const App = () => {
         </div>
 
         {/* Side Logs */}
-        <div className="absolute left-8 top-1/2 -translate-y-1/2 w-56 border-l border-zinc-800/50 pl-4 space-y-3 hidden lg:block opacity-80 hover:opacity-100 transition-opacity">
+        <div className="absolute left-8 top-1/2 -translate-y-1/2 w-56 border-l border-zinc-800/50 pl-4 hidden lg:flex opacity-80 hover:opacity-100 transition-opacity max-h-64 overflow-y-auto flex-col justify-end space-y-3">
            <div className="text-[0.5rem] text-zinc-500 tracking-widest font-black uppercase border-b border-zinc-800/50 pb-1 text-shadow-sm">Telemetry</div>
-           {gameState.log.map((log, i) => (
-             <div key={i} className={`text-[0.6rem] ${i === 0 ? 'text-red-400 font-bold animate-pulse-slow' : 'text-zinc-400'} leading-tight tracking-tight`}>
-               {`[${new Date().getSeconds()}:${i}] ${log.toUpperCase()}`}
-             </div>
-           ))}
+           {gameState.log.map((log, i) => {
+             const isLatest = i === gameState.log.length - 1;
+             return (
+               <div key={i} className={`text-[0.6rem] ${isLatest ? 'text-red-400 font-bold animate-pulse-slow' : 'text-zinc-400'} leading-tight tracking-tight`}>
+                 {(log ?? '').toString().toUpperCase()}
+               </div>
+             );
+           })}
         </div>
       </main>
 
