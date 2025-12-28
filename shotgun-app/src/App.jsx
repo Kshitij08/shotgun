@@ -89,7 +89,6 @@ const XIcon = ({ className }) => (
 // --- GAME CONSTANTS & HELPERS ---
 const HP_MAX = 4;
 const DEFAULT_SEED = 1337421;
-const ITEMS_PER_ROUND = 2;
 const MAX_INVENTORY = 4;
 
 const ITEM_CONFIG = {
@@ -292,7 +291,8 @@ const App = () => {
     knowledge: freshKnowledge(),
     currentTurn: 'player',
     matchOver: false,
-    seed
+    seed,
+    itemsPerRound: 0
   });
 
   const [gameState, setGameState] = useState(() => createInitialGameState());
@@ -405,13 +405,13 @@ const App = () => {
     return { updatedStatus, nextTurn: next, telemetry };
   };
 
-  const addItemsToInventory = (inventory, ownerKey, telemetry) => {
-    let updated = [...inventory];
-    for (let i = 0; i < ITEMS_PER_ROUND; i++) {
-      const kind = pickWeightedItem(random);
-      const item = buildItem(kind, random);
-      if (item) updated.push(item);
-    }
+const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
+  let updated = [...inventory];
+  for (let i = 0; i < count; i++) {
+    const kind = pickWeightedItem(random);
+    const item = buildItem(kind, random);
+    if (item) updated.push(item);
+  }
     let discarded = 0;
     while (updated.length > MAX_INVENTORY) {
       const idx = Math.floor(random() * updated.length);
@@ -435,8 +435,11 @@ const App = () => {
       `R${state.round + 1} START: ${length} shells (${liveCount} LIVE / ${blankCount} BLANK)`
     ];
 
-    const playerInventory = addItemsToInventory(state.playerInventory, 'player', telemetry);
-    const dealerInventory = addItemsToInventory(state.dealerInventory, 'dealer', telemetry);
+    const itemsToGive = state.itemsPerRound ?? 0;
+    const nextItemsPerRound = Math.min(1, itemsToGive + 1);
+
+    const playerInventory = addItemsToInventory(state.playerInventory, 'player', telemetry, itemsToGive);
+    const dealerInventory = addItemsToInventory(state.dealerInventory, 'dealer', telemetry, itemsToGive);
     const { updatedStatus, nextTurn, telemetry: skipMessages } = resolveSkips(state.statusEffects, 'player');
 
     return {
@@ -451,7 +454,8 @@ const App = () => {
       dealerInventory,
       statusEffects: updatedStatus,
       currentTurn: nextTurn,
-      log: pushTelemetry(state.log, [...telemetry, ...skipMessages])
+      log: pushTelemetry(state.log, [...telemetry, ...skipMessages]),
+      itemsPerRound: nextItemsPerRound
     };
   };
 
@@ -505,26 +509,14 @@ const App = () => {
     setGameState(resetState);
   };
 
-  const handleContinue = () => {
-      setCryptoState(prev => ({
-          ...prev,
-          multiplier: parseFloat((prev.multiplier + 0.5).toFixed(1)),
-          phase: 'playing'
-      }));
-      setGameState(prev => startRoundFromState({
-        ...prev,
-        dealerHealth: HP_MAX,
-        playerHealth: HP_MAX,
-        matchOver: false
-      }, [`MATCH RESET: seed ${rngSeedRef.current}`]));
-  };
+  const handleContinue = () => {};
 
   const concludeMatchIfNeeded = (state, telemetry) => {
     let nextState = { ...state };
     if (state.dealerHealth <= 0) {
       nextState.matchOver = true;
       telemetry.push("MATCH OVER: You win");
-      setCryptoState(prev => ({ ...prev, phase: 'round_won' }));
+    setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
     } else if (state.playerHealth <= 0) {
       nextState.matchOver = true;
       telemetry.push("MATCH OVER: Dealer wins");
@@ -604,7 +596,7 @@ const App = () => {
 
       const color = isLive ? 'red' : 'white';
       triggerShell(target === 'dealer' ? 'dealer' : 'self', color);
-      setShotEffect(target === 'dealer' ? 'dealer' : (isLive ? 'self' : null));
+      setShotEffect(isLive ? (target === 'dealer' ? 'dealer' : 'self') : null);
       setTimeout(() => {
         setShotEffect(null);
         setAimingAt(null);
