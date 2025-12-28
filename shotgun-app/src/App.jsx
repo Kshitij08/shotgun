@@ -195,6 +195,7 @@ const buildItem = (kind, rng) => {
 };
 
 const clampHp = (hp) => Math.max(0, Math.min(HP_MAX, hp));
+const DEALER_TURN_DELAY_MS = 4000;
 
 // --- DEALER EYES COMPONENT ---
 const DealerEyes = () => {
@@ -303,9 +304,19 @@ const App = () => {
   const [isSawedOff, setIsSawedOff] = useState(false);
   const [scanningShell, setScanningShell] = useState(null); 
   const [effectOverlay, setEffectOverlay] = useState(null); 
+  const [suppressHoverAim, setSuppressHoverAim] = useState(false);
+  const [playerLockUntil, setPlayerLockUntil] = useState(0);
   const [gameMousePos, setGameMousePos] = useState({ x: 0, y: 0 });
   const gameEyesRef = useRef(null);
   const gameStateRef = useRef(null);
+  const dealerTimerRef = useRef(null);
+  const scheduleDealerTurnDelay = () => {
+    if (dealerTimerRef.current) clearTimeout(dealerTimerRef.current);
+    dealerTimerRef.current = setTimeout(() => {
+      dealerTimerRef.current = null;
+      dealerTakeTurn();
+    }, DEALER_TURN_DELAY_MS);
+  };
 
   const rngSeedRef = useRef(DEFAULT_SEED);
   const rngRef = useRef(mulberry32(DEFAULT_SEED));
@@ -323,6 +334,14 @@ const App = () => {
   }, [gameState]);
 
   useEffect(() => {
+    if (playerLockUntil > Date.now()) {
+      const timeout = playerLockUntil - Date.now();
+      const t = setTimeout(() => setPlayerLockUntil(0), timeout);
+      return () => clearTimeout(t);
+    }
+  }, [playerLockUntil]);
+
+  useEffect(() => {
     const handleMouseMove = (e) => setGameMousePos({ x: e.clientX, y: e.clientY });
     window.addEventListener('mousemove', handleMouseMove);
     return () => window.removeEventListener('mousemove', handleMouseMove);
@@ -333,6 +352,11 @@ const App = () => {
       setShotEffect(null);
       setEffectOverlay(null);
       setShell(null);
+      if (dealerTimerRef.current) {
+        clearTimeout(dealerTimerRef.current);
+        dealerTimerRef.current = null;
+      }
+      setPlayerLockUntil(0);
     }
   }, [cryptoState.phase]);
 
@@ -583,8 +607,12 @@ const App = () => {
       setShotEffect(target === 'dealer' ? 'dealer' : (isLive ? 'self' : null));
       setTimeout(() => {
         setShotEffect(null);
+        setAimingAt(null);
         if (shooter === 'player') setIsSawedOff(false);
-      }, 800);
+      }, 2000);
+      if (shooter === 'dealer') {
+        setPlayerLockUntil(Date.now() + 2000);
+      }
       return nextState;
     });
   };
@@ -612,7 +640,7 @@ const App = () => {
       let currentShellIndex = prev.currentShellIndex;
       let playerHealth = prev.playerHealth;
       let dealerHealth = prev.dealerHealth;
-      let keepTurn = false;
+      let keepTurn = actor === 'dealer'; // dealer keeps turn after item use; player keeps by default elsewhere
 
       const applyInventory = (key) => {
         if (key === 'player') {
@@ -659,7 +687,7 @@ const App = () => {
         }
         case 'MAGNIFYING_GLASS': {
           if (remainingShells <= 0) {
-            telemetry.push(`${ACTOR_LABEL[actor]}: Chamber empty`);
+            telemetry.push(`${ACTOR_LABEL[actor]}: Glass → chamber empty`);
           } else {
             knowledge = {
               ...knowledge,
@@ -668,9 +696,13 @@ const App = () => {
                 knownCurrentShellType: currentShellType
               }
             };
-            telemetry.push(`${ACTOR_LABEL[actor]}: Glass → ${currentShellType}`);
-            setScanningShell(currentShellType === 'LIVE' ? 'live' : 'blank');
-            setTimeout(() => setScanningShell(null), 1500);
+            if (actor === 'player') {
+              telemetry.push(`${ACTOR_LABEL[actor]}: Glass → ${currentShellType}`);
+              setScanningShell(currentShellType === 'LIVE' ? 'live' : 'blank');
+              setTimeout(() => setScanningShell(null), 1500);
+            } else {
+              telemetry.push(`${ACTOR_LABEL[actor]}: Glass used`);
+            }
           }
           break;
         }
@@ -729,14 +761,25 @@ const App = () => {
     });
   };
 
-  const handleShootSelf = () => resolveShot('player', 'player');
-  const handleShootDealer = () => resolveShot('player', 'dealer');
+  const handleShootSelf = () => {
+    setSuppressHoverAim(true);
+    setAimingAt('self');
+    setTimeout(() => setSuppressHoverAim(false), 2000);
+    resolveShot('player', 'player');
+  };
+  const handleShootDealer = () => {
+    setSuppressHoverAim(true);
+    setAimingAt('dealer');
+    setTimeout(() => setSuppressHoverAim(false), 2000);
+    resolveShot('player', 'dealer');
+  };
   const handleUseItem = (item) => {
     if (!item) return;
     handleItemUse('player', item);
   };
 
-  const isPlayerTurn = cryptoState.phase === 'playing' && gameState.currentTurn === 'player' && !gameState.matchOver;
+  const isPlayerTurn = cryptoState.phase === 'playing' && gameState.currentTurn === 'player' && !gameState.matchOver && !(playerLockUntil > Date.now());
+  const isReloading = gameState.chamber.length > 0 && gameState.currentShellIndex >= gameState.chamber.length && !gameState.matchOver;
 
   const dealerTakeTurn = () => {
     const latest = gameStateRef.current || gameState;
@@ -770,36 +813,61 @@ const App = () => {
       return false;
     };
 
+    const aimAndShoot = (targetKey) => {
+      const aimTarget = targetKey === 'dealer' ? 'dealer' : 'self';
+      runIfDealerTurn(() => {
+        setAimingAt(aimTarget);
+        setSuppressHoverAim(true);
+        setTimeout(() => {
+          setSuppressHoverAim(false);
+          const current = gameStateRef.current || latest;
+          if (cryptoState.phase !== 'playing') return;
+          if (current.matchOver || current.currentTurn !== 'dealer') return;
+          resolveShot('dealer', targetKey);
+        }, 2000);
+      });
+    };
+
     const current = gameStateRef.current || latest;
     const knownShell = current.knowledge.dealer.currentShellKnown ? current.knowledge.dealer.knownCurrentShellType : null;
     const pLive = remaining > 0 ? current.liveShells / remaining : 0;
 
-    if (current.dealerHealth <= 1 && useItem('CIGARETTES')) return;
-    if (!knownShell && useItem('MAGNIFYING_GLASS')) return;
+    if (current.dealerHealth <= 1 && useItem('CIGARETTES')) {
+      scheduleDealerTurnDelay();
+      return;
+    }
+    if (!knownShell && useItem('MAGNIFYING_GLASS')) {
+      scheduleDealerTurnDelay();
+      return;
+    }
 
     if (knownShell === 'BLANK') {
-      runIfDealerTurn(() => {
-        if (random() < 0.6) {
-          resolveShot('dealer', 'dealer');
-        } else {
-          resolveShot('dealer', 'player');
-        }
-      });
+      if (random() < 0.6) {
+        aimAndShoot('dealer');
+      } else {
+        aimAndShoot('player');
+      }
       return;
     }
 
     if (knownShell === 'LIVE') {
       if (current.playerHealth <= 2 && useItem('HAND_SAW')) return;
-      runIfDealerTurn(() => resolveShot('dealer', 'player'));
+      aimAndShoot('player');
       return;
     }
 
-    if (pLive > 0.6 && current.dealerHealth <= 2 && useItem('BEER')) return;
+    if (pLive > 0.6 && current.dealerHealth <= 2 && useItem('BEER')) {
+      scheduleDealerTurnDelay();
+      return;
+    }
 
-    if (random() < 0.15 && useItem('SKIP')) return;
+    if (random() < 0.15 && useItem('SKIP')) {
+      scheduleDealerTurnDelay();
+      return;
+    }
 
     const chooseSelf = (random() < 0.1 ? random() < 0.5 : pLive < 0.5);
-    runIfDealerTurn(() => resolveShot('dealer', chooseSelf ? 'dealer' : 'player'));
+    aimAndShoot(chooseSelf ? 'dealer' : 'player');
   };
 
   useEffect(() => {
@@ -823,8 +891,19 @@ const App = () => {
       return;
     }
 
-    const timer = setTimeout(() => dealerTakeTurn(), 2000);
-    return () => clearTimeout(timer);
+    if (dealerTimerRef.current) {
+      clearTimeout(dealerTimerRef.current);
+    }
+    dealerTimerRef.current = setTimeout(() => {
+      dealerTimerRef.current = null;
+      dealerTakeTurn();
+    }, DEALER_TURN_DELAY_MS);
+    return () => {
+      if (dealerTimerRef.current) {
+        clearTimeout(dealerTimerRef.current);
+        dealerTimerRef.current = null;
+      }
+    };
   }, [
     gameState.currentTurn,
     gameState.statusEffects.dealer.skipTurnsRemaining,
@@ -1315,6 +1394,11 @@ const App = () => {
 
         {/* MIDDLE SECTION: THE SHOTGUN */}
         <div className="flex-1 flex items-center justify-center w-full max-w-3xl relative py-4 z-20 -mt-20">
+          {isReloading && (
+            <div className="absolute -top-6 left-1/2 -translate-x-1/2 px-3 py-1 bg-red-900/30 border border-red-500/50 text-red-300 text-[0.65rem] font-bold uppercase tracking-[0.2em] rounded shadow-[0_0_12px_rgba(220,38,38,0.4)]">
+              Reloading...
+            </div>
+          )}
           <div className="relative w-full h-40 flex items-center justify-center group cursor-crosshair">
              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3/4 h-24 bg-zinc-800/30 blur-2xl rounded-[100%] transition-all duration-1000" />
              
@@ -1477,7 +1561,7 @@ const App = () => {
           <div className="flex gap-8 relative z-10">
             <button 
               onClick={handleShootSelf}
-              onMouseEnter={() => setAimingAt('self')}
+              onMouseEnter={() => !suppressHoverAim && setAimingAt('self')}
               onMouseLeave={() => setAimingAt(null)}
               disabled={!isPlayerTurn}
               className="group relative px-8 py-4 bg-zinc-900 border border-zinc-700 text-zinc-300 text-[0.7rem] font-black uppercase tracking-widest hover:border-red-500 hover:text-red-400 transition-all active:scale-95 hover:shadow-[0_0_15px_rgba(220,38,38,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1486,7 +1570,7 @@ const App = () => {
             </button>
             <button 
               onClick={handleShootDealer}
-              onMouseEnter={() => setAimingAt('dealer')}
+              onMouseEnter={() => !suppressHoverAim && setAimingAt('dealer')}
               onMouseLeave={() => setAimingAt(null)}
               disabled={!isPlayerTurn}
               className="group relative px-8 py-4 bg-zinc-900 border border-zinc-700 text-zinc-300 text-[0.7rem] font-black uppercase tracking-widest hover:border-red-500 hover:text-red-400 transition-all active:scale-95 hover:shadow-[0_0_15px_rgba(220,38,38,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
