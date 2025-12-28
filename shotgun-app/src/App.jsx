@@ -193,6 +193,27 @@ const App = () => {
   const [dealerSkipped, setDealerSkipped] = useState(false); 
   const [scanningShell, setScanningShell] = useState(null); 
   const [effectOverlay, setEffectOverlay] = useState(null); 
+  const [gameMousePos, setGameMousePos] = useState({ x: 0, y: 0 });
+  const gameEyesRef = useRef(null);
+
+  useEffect(() => {
+    const handleMouseMove = (e) => setGameMousePos({ x: e.clientX, y: e.clientY });
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, []);
+
+  const calcDealerEyeOffset = (eyeOffsetX = 0) => {
+    if (!gameEyesRef.current) return { x: 0, y: 0 };
+    const rect = gameEyesRef.current.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2 + eyeOffsetX;
+    const centerY = rect.top + rect.height / 2;
+    const dx = gameMousePos.x - centerX;
+    const dy = gameMousePos.y - centerY;
+    const angle = Math.atan2(dy, dx);
+    const maxDist = 10;
+    const dist = Math.min(Math.hypot(dx, dy) / 30, maxDist);
+    return { x: Math.cos(angle) * dist, y: Math.sin(angle) * dist };
+  };
 
   const addLog = (msg) => {
     setGameState(prev => ({
@@ -785,17 +806,75 @@ const App = () => {
         
         {/* TOP SECTION: Dealer Eyes & Inventory */}
         <div className="flex flex-col items-center gap-2 w-full -mt-8">
-          <div className="relative group">
+          <div className="relative group" ref={gameEyesRef}>
                <div className={`absolute -inset-24 bg-red-900/5 blur-[90px] rounded-full pointer-events-none transition-all duration-300 ${shotEffect === 'dealer' ? 'bg-red-600/30 blur-[120px]' : ''} animate-pulse-slow`} />
                <div className="absolute -inset-20 bg-white/10 blur-[110px] rounded-full pointer-events-none opacity-60" />
                
-               <div className={`w-48 h-32 flex items-center justify-center relative transition-transform duration-200 ${shotEffect === 'dealer' ? 'scale-125' : ''}`}>
-                 <div className="absolute left-[30%] -translate-x-1/2 flex flex-col items-center">
-                   <div className={`w-5 h-5 rounded-full transition-all duration-200 animate-blink ${shotEffect === 'dealer' ? 'bg-red-600 shadow-[0_0_30px_red] w-8 h-8' : 'bg-zinc-100 shadow-[0_0_25px_rgba(255,255,255,0.6)]'}`} style={{ animationDuration: '6s', animationDelay: '0.2s' }} />
+               <div
+                 className={`w-48 h-32 flex items-center justify-center relative transition-transform duration-200 ${shotEffect === 'dealer' ? 'scale-125' : ''} ${
+                   aimingAt === 'dealer'
+                     ? 'scale-125 saturate-150 animate-[fear-wiggle_0.6s_ease-in-out_infinite]'
+                     : aimingAt === 'self'
+                       ? 'scale-110 contrast-125 blur-[0.5px]'
+                       : ''
+                 }`}
+               >
+                 <div
+                   className="absolute left-[30%] -translate-x-1/2 flex flex-col items-center"
+                   style={{ transform: `translate(${calcDealerEyeOffset(-30).x}px, ${calcDealerEyeOffset(-30).y}px)` }}
+                 >
+                   <div
+                     className={`rounded-full transition-all duration-200 animate-blink ${
+                       shotEffect === 'dealer'
+                         ? 'bg-red-600 shadow-[0_0_30px_red] w-8 h-8'
+                         : 'bg-zinc-100 shadow-[0_0_25px_rgba(255,255,255,0.6)] w-5 h-5'
+                     } ${
+                       aimingAt === 'dealer'
+                         ? 'w-8 h-8 bg-red-500 shadow-[0_0_35px_rgba(220,38,38,0.8)]'
+                         : aimingAt === 'self'
+                           ? 'w-7 h-7 bg-red-500 shadow-[0_0_35px_rgba(220,38,38,0.7)]'
+                           : ''
+                     }`}
+                     style={{
+                       animationDuration: aimingAt ? '3s' : '6s',
+                       animationDelay: '0.2s',
+                       ...(aimingAt === 'self'
+                         ? {
+                             background: 'radial-gradient(circle at center, #0b0b0b 0 18%, rgba(248,113,113,0.95) 35%, #ef4444 60%, #b91c1c 100%)',
+                             boxShadow: '0 0 45px rgba(220,38,38,0.9), 0 0 70px rgba(220,38,38,0.6)',
+                           }
+                         : {}),
+                     }}
+                   />
                  </div>
 
-                 <div className="absolute right-[30%] translate-x-1/2 flex flex-col items-center">
-                   <div className={`w-5 h-5 rounded-full transition-all duration-200 animate-blink ${shotEffect === 'dealer' ? 'bg-red-600 shadow-[0_0_30px_red] w-8 h-8' : 'bg-zinc-100 shadow-[0_0_25px_rgba(255,255,255,0.6)]'}`} style={{ animationDuration: '5.5s', animationDelay: '0s' }} />
+                 <div
+                   className="absolute right-[30%] translate-x-1/2 flex flex-col items-center"
+                   style={{ transform: `translate(${calcDealerEyeOffset(30).x}px, ${calcDealerEyeOffset(30).y}px)` }}
+                 >
+                   <div
+                     className={`rounded-full transition-all duration-200 animate-blink ${
+                       shotEffect === 'dealer'
+                         ? 'bg-red-600 shadow-[0_0_30px_red] w-8 h-8'
+                         : 'bg-zinc-100 shadow-[0_0_25px_rgba(255,255,255,0.6)] w-5 h-5'
+                     } ${
+                       aimingAt === 'dealer'
+                         ? 'w-8 h-8 bg-red-500 shadow-[0_0_35px_rgba(220,38,38,0.8)]'
+                         : aimingAt === 'self'
+                           ? 'w-7 h-7 bg-red-500 shadow-[0_0_35px_rgba(220,38,38,0.7)]'
+                           : ''
+                     }`}
+                     style={{
+                       animationDuration: aimingAt ? '3s' : '5.5s',
+                       animationDelay: '0s',
+                       ...(aimingAt === 'self'
+                         ? {
+                             background: 'radial-gradient(circle at center, #0b0b0b 0 18%, rgba(248,113,113,0.95) 35%, #ef4444 60%, #b91c1c 100%)',
+                             boxShadow: '0 0 45px rgba(220,38,38,0.9), 0 0 70px rgba(220,38,38,0.6)',
+                           }
+                         : {}),
+                     }}
+                   />
                  </div>
 
                  <div className="absolute inset-0 opacity-10 mix-blend-overlay pointer-events-none animate-noise" />
@@ -1097,6 +1176,11 @@ const App = () => {
             0% { transform: translateY(0) scale(1); opacity: 0; }
             40% { opacity: 0.4; }
             100% { transform: translateY(-100px) translateX(10px) scale(1.8); opacity: 0; }
+        }
+        @keyframes fear-wiggle {
+          0% { transform: translate(0, 0) rotate(0deg); }
+          50% { transform: translate(1px, -1px) rotate(-1deg); }
+          100% { transform: translate(0, 0) rotate(0deg); }
         }
         @keyframes sawing {
             0% { transform: translateY(0); }
