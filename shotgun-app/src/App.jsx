@@ -305,6 +305,7 @@ const App = () => {
   const [effectOverlay, setEffectOverlay] = useState(null); 
   const [gameMousePos, setGameMousePos] = useState({ x: 0, y: 0 });
   const gameEyesRef = useRef(null);
+  const gameStateRef = useRef(null);
 
   const rngSeedRef = useRef(DEFAULT_SEED);
   const rngRef = useRef(mulberry32(DEFAULT_SEED));
@@ -316,6 +317,10 @@ const App = () => {
 
   const random = () => rngRef.current();
   const randomInt = (min, max) => Math.floor(random() * (max - min + 1)) + min;
+
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
   useEffect(() => {
     const handleMouseMove = (e) => setGameMousePos({ x: e.clientX, y: e.clientY });
@@ -620,6 +625,7 @@ const App = () => {
       let dealerInventory = prev.dealerInventory;
       if (actor === 'player') {
         playerInventory = applyInventory('player');
+        keepTurn = true; // Player keeps turn after using an item; dealer acts after the next shot
       } else {
         dealerInventory = applyInventory('dealer');
       }
@@ -730,54 +736,70 @@ const App = () => {
     handleItemUse('player', item);
   };
 
-  const dealerTakeTurn = () => {
-    const state = gameState;
-    if (cryptoState.phase !== 'playing' || state.matchOver) return;
-    if (state.currentTurn !== 'dealer') return;
+  const isPlayerTurn = cryptoState.phase === 'playing' && gameState.currentTurn === 'player' && !gameState.matchOver;
 
-    const remaining = state.chamber.length - state.currentShellIndex;
+  const dealerTakeTurn = () => {
+    const latest = gameStateRef.current || gameState;
+    if (cryptoState.phase !== 'playing' || latest.matchOver) return;
+    if (latest.currentTurn !== 'dealer') return;
+
+    const remaining = latest.chamber.length - latest.currentShellIndex;
     if (remaining <= 0) {
       setGameState(prev => handleRoundExhausted(prev));
       return;
     }
 
-    const findItem = (kind) => state.dealerInventory.find(it => it.kind === kind);
+    const findItem = (kind) => {
+      const current = gameStateRef.current || latest;
+      return current.dealerInventory.find(it => it.kind === kind);
+    };
+
+    const runIfDealerTurn = (fn) => {
+      const current = gameStateRef.current || latest;
+      if (cryptoState.phase !== 'playing') return false;
+      if (current.matchOver || current.currentTurn !== 'dealer') return false;
+      fn();
+      return true;
+    };
+
     const useItem = (kind) => {
       const item = findItem(kind);
       if (item) {
-        handleItemUse('dealer', item);
-        return true;
+        return runIfDealerTurn(() => handleItemUse('dealer', item));
       }
       return false;
     };
 
-    const knownShell = state.knowledge.dealer.currentShellKnown ? state.knowledge.dealer.knownCurrentShellType : null;
-    const pLive = remaining > 0 ? state.liveShells / remaining : 0;
+    const current = gameStateRef.current || latest;
+    const knownShell = current.knowledge.dealer.currentShellKnown ? current.knowledge.dealer.knownCurrentShellType : null;
+    const pLive = remaining > 0 ? current.liveShells / remaining : 0;
 
-    if (state.dealerHealth <= 1 && useItem('CIGARETTES')) return;
+    if (current.dealerHealth <= 1 && useItem('CIGARETTES')) return;
     if (!knownShell && useItem('MAGNIFYING_GLASS')) return;
 
     if (knownShell === 'BLANK') {
-      if (random() < 0.6) {
-        resolveShot('dealer', 'dealer');
-      } else {
-        resolveShot('dealer', 'player');
-      }
+      runIfDealerTurn(() => {
+        if (random() < 0.6) {
+          resolveShot('dealer', 'dealer');
+        } else {
+          resolveShot('dealer', 'player');
+        }
+      });
       return;
     }
 
     if (knownShell === 'LIVE') {
-      if (state.playerHealth <= 2 && useItem('HAND_SAW')) return;
-      resolveShot('dealer', 'player');
+      if (current.playerHealth <= 2 && useItem('HAND_SAW')) return;
+      runIfDealerTurn(() => resolveShot('dealer', 'player'));
       return;
     }
 
-    if (pLive > 0.6 && state.dealerHealth <= 2 && useItem('BEER')) return;
+    if (pLive > 0.6 && current.dealerHealth <= 2 && useItem('BEER')) return;
 
     if (random() < 0.15 && useItem('SKIP')) return;
 
     const chooseSelf = (random() < 0.1 ? random() < 0.5 : pLive < 0.5);
-    resolveShot('dealer', chooseSelf ? 'dealer' : 'player');
+    runIfDealerTurn(() => resolveShot('dealer', chooseSelf ? 'dealer' : 'player'));
   };
 
   useEffect(() => {
@@ -1457,7 +1479,7 @@ const App = () => {
               onClick={handleShootSelf}
               onMouseEnter={() => setAimingAt('self')}
               onMouseLeave={() => setAimingAt(null)}
-              disabled={cryptoState.phase !== 'playing'}
+              disabled={!isPlayerTurn}
               className="group relative px-8 py-4 bg-zinc-900 border border-zinc-700 text-zinc-300 text-[0.7rem] font-black uppercase tracking-widest hover:border-red-500 hover:text-red-400 transition-all active:scale-95 hover:shadow-[0_0_15px_rgba(220,38,38,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Point at Self
@@ -1466,7 +1488,7 @@ const App = () => {
               onClick={handleShootDealer}
               onMouseEnter={() => setAimingAt('dealer')}
               onMouseLeave={() => setAimingAt(null)}
-              disabled={cryptoState.phase !== 'playing'}
+              disabled={!isPlayerTurn}
               className="group relative px-8 py-4 bg-zinc-900 border border-zinc-700 text-zinc-300 text-[0.7rem] font-black uppercase tracking-widest hover:border-red-500 hover:text-red-400 transition-all active:scale-95 hover:shadow-[0_0_15px_rgba(220,38,38,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Point at Him
@@ -1484,7 +1506,7 @@ const App = () => {
               owner="Player" 
               max={4} 
               onHover={setActiveItem} 
-              onUse={handleUseItem}
+              onUse={isPlayerTurn ? handleUseItem : undefined}
             />
           </div>
         </div>
