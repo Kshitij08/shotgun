@@ -518,7 +518,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       nextState.matchOver = true;
     nextState.lastOutcome = 'player';
       telemetry.push("MATCH OVER: You win");
-    setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
+      setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
     } else if (state.playerHealth <= 0) {
       nextState.matchOver = true;
     nextState.lastOutcome = 'dealer';
@@ -1233,7 +1233,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                     {gameState.lastOutcome === 'player' ? 'YOU WIN' : 'YOU DIED'}
                   </h1>
                   <div className={`${gameState.lastOutcome === 'player' ? 'text-green-300' : 'text-red-300'} font-mono tracking-widest text-sm mb-8`}>
-                      {gameState.lastOutcome === 'player' ? 'Victory' : 'LOSS'}: {cryptoState.currentWager.toFixed(2)} ETH
+                      {gameState.lastOutcome === 'player' ? 'Victory: +' : 'LOSS: -'}{gameState.lastOutcome === 'player' ? (cryptoState.currentWager * 2).toFixed(2) : (cryptoState.currentWager).toFixed(2)} ETH
                   </div>
                   <button 
                     onClick={() => {
@@ -1272,29 +1272,8 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
             <span className="text-red-500">Round {gameState.round}</span>
             <span className="text-zinc-600">•</span>
             <span className="text-zinc-400">Rate:</span>
-            <span className="text-white">{cryptoState.multiplier}x</span>
+            <span className="text-white">2x</span>
           </div>
-          <div className="flex items-center justify-center gap-6 mb-2 bg-zinc-900/80 px-6 py-2 rounded-full border border-zinc-800 backdrop-blur-sm shadow-md">
-             {/* Left Side: Wager - Fixed width to balance layout */}
-             <div className="flex flex-col items-end w-24">
-                 <span className="text-[0.5rem] text-zinc-500 uppercase tracking-widest font-bold">Wager</span>
-                 <span className="text-sm font-mono text-zinc-200">{cryptoState.currentWager}</span>
-             </div>
-             
-             {/* Center Divider */}
-             <div className="h-6 w-px bg-zinc-700"></div>
-             
-             {/* Right Side: Win - Fixed width to balance layout */}
-             <div className="flex flex-col items-start w-24">
-                 <span className="text-[0.5rem] text-red-500 uppercase tracking-widest font-bold flex items-center gap-1">
-                     <TrendingUp size={8} /> Win ({cryptoState.multiplier}x)
-                 </span>
-                 <span className="text-sm font-mono text-red-400 drop-shadow-[0_0_5px_rgba(220,38,38,0.5)]">
-                     {(cryptoState.currentWager * cryptoState.multiplier).toFixed(0)}
-                 </span>
-             </div>
-          </div>
-          
           <div className="text-[0.6rem] text-zinc-400 font-bold">
             <span className="text-red-500 drop-shadow-[0_0_8px_rgba(220,38,38,0.6)]">LIVE: {gameState.liveShells}</span> <span className="mx-2 opacity-30">|</span> <span className="text-zinc-500">BLANK: {gameState.blankShells}</span>
           </div>
