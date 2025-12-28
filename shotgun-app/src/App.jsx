@@ -131,7 +131,10 @@ const DealerEyes = () => {
           style={{ transform: `translate(${leftPupil.x}px, ${leftPupil.y}px)` }}
        >
           {/* Visual Eye - Handles Blinking & Glow */}
-          <div className="w-48 h-48 bg-zinc-100 rounded-full shadow-[0_0_100px_rgba(220,38,38,0.6)] opacity-90 animate-blink" />
+          <div
+            className="w-48 h-48 bg-zinc-100 rounded-full shadow-[0_0_100px_rgba(220,38,38,0.6)] opacity-90 animate-blink"
+            style={{ boxShadow: '0 0 100px rgba(220,38,38,0.6), 0 0 120px rgba(255,255,255,0.35)' }}
+          />
        </div>
 
        {/* Right Eye Wrapper - Handles Mouse Movement */}
@@ -140,7 +143,10 @@ const DealerEyes = () => {
           style={{ transform: `translate(${rightPupil.x}px, ${rightPupil.y}px)` }}
        >
           {/* Visual Eye - Handles Blinking & Glow - Slight delay for irregularity */}
-          <div className="w-48 h-48 bg-zinc-100 rounded-full shadow-[0_0_100px_rgba(220,38,38,0.6)] opacity-90 animate-blink" style={{ animationDelay: '0.15s' }} />
+          <div
+            className="w-48 h-48 bg-zinc-100 rounded-full shadow-[0_0_100px_rgba(220,38,38,0.6)] opacity-90 animate-blink"
+            style={{ animationDelay: '0.15s', boxShadow: '0 0 100px rgba(220,38,38,0.6), 0 0 120px rgba(255,255,255,0.35)' }}
+          />
        </div>
     </div>
   );
@@ -419,7 +425,7 @@ const App = () => {
   const InventoryBar = ({ items, owner, max = 4, onHover, onUse }) => (
     <div className="flex flex-col items-center gap-2">
       <div className="text-[0.5rem] text-zinc-400 tracking-[0.3em] uppercase font-bold text-shadow-glow">
-        {owner} Assets
+        {owner} Items
       </div>
       <div className="flex gap-2 p-2 bg-zinc-900/80 border border-zinc-700 rounded-lg backdrop-blur-sm shadow-[0_0_20px_rgba(20,0,0,0.5)]">
         {[...Array(max)].map((_, i) => {
@@ -459,9 +465,6 @@ const App = () => {
           } rounded-sm`}
         />
       ))}
-      <div className="text-zinc-500 font-mono text-[0.6rem] uppercase tracking-widest px-2">
-        {health}/{max}
-      </div>
     </div>
   );
 
@@ -731,6 +734,12 @@ const App = () => {
 
         {/* --- ECONOMY HUD --- */}
         <div className="flex flex-col items-center">
+          <div className="text-xs font-black tracking-[0.3em] uppercase mb-1 flex items-center gap-2 drop-shadow-[0_0_8px_rgba(220,38,38,0.5)]">
+            <span className="text-red-500">Round {gameState.round}</span>
+            <span className="text-zinc-600">•</span>
+            <span className="text-zinc-400">Rate:</span>
+            <span className="text-white">{cryptoState.multiplier}x</span>
+          </div>
           <div className="flex items-center justify-center gap-6 mb-2 bg-zinc-900/80 px-6 py-2 rounded-full border border-zinc-800 backdrop-blur-sm shadow-md">
              {/* Left Side: Wager - Fixed width to balance layout */}
              <div className="flex flex-col items-end w-24">
@@ -778,25 +787,22 @@ const App = () => {
         <div className="flex flex-col items-center gap-2 w-full -mt-8">
           <div className="relative group">
                <div className={`absolute -inset-24 bg-red-900/5 blur-[90px] rounded-full pointer-events-none transition-all duration-300 ${shotEffect === 'dealer' ? 'bg-red-600/30 blur-[120px]' : ''} animate-pulse-slow`} />
+               <div className="absolute -inset-20 bg-white/10 blur-[110px] rounded-full pointer-events-none opacity-60" />
                
                <div className={`w-48 h-32 flex items-center justify-center relative transition-transform duration-200 ${shotEffect === 'dealer' ? 'scale-125' : ''}`}>
                  <div className="absolute left-[30%] -translate-x-1/2 flex flex-col items-center">
-                   <div className={`w-3 h-3 rounded-full transition-all duration-200 animate-blink ${shotEffect === 'dealer' ? 'bg-red-600 shadow-[0_0_30px_red] w-6 h-6' : 'bg-zinc-100 shadow-[0_0_25px_rgba(255,255,255,0.6)]'}`} style={{ animationDuration: '6s', animationDelay: '0.2s' }}>
-                     <div className={`w-0.5 h-0.5 rounded-full mt-1 ml-1 blur-[0.5px] ${shotEffect === 'dealer' ? 'bg-red-200 opacity-90' : 'bg-black opacity-40'}`} />
-                   </div>
+                   <div className={`w-5 h-5 rounded-full transition-all duration-200 animate-blink ${shotEffect === 'dealer' ? 'bg-red-600 shadow-[0_0_30px_red] w-8 h-8' : 'bg-zinc-100 shadow-[0_0_25px_rgba(255,255,255,0.6)]'}`} style={{ animationDuration: '6s', animationDelay: '0.2s' }} />
                  </div>
 
                  <div className="absolute right-[30%] translate-x-1/2 flex flex-col items-center">
-                   <div className={`w-3 h-3 rounded-full transition-all duration-200 animate-blink ${shotEffect === 'dealer' ? 'bg-red-600 shadow-[0_0_30px_red] w-6 h-6' : 'bg-zinc-100 shadow-[0_0_25px_rgba(255,255,255,0.6)]'}`} style={{ animationDuration: '5.5s', animationDelay: '0s' }}>
-                     <div className={`w-0.5 h-0.5 rounded-full mt-1 ml-1 blur-[0.5px] ${shotEffect === 'dealer' ? 'bg-red-200 opacity-90' : 'bg-black opacity-40'}`} />
-                   </div>
+                   <div className={`w-5 h-5 rounded-full transition-all duration-200 animate-blink ${shotEffect === 'dealer' ? 'bg-red-600 shadow-[0_0_30px_red] w-8 h-8' : 'bg-zinc-100 shadow-[0_0_25px_rgba(255,255,255,0.6)]'}`} style={{ animationDuration: '5.5s', animationDelay: '0s' }} />
                  </div>
 
                  <div className="absolute inset-0 opacity-10 mix-blend-overlay pointer-events-none animate-noise" />
                </div>
           </div>
 
-          <div className="animate-in fade-in slide-in-from-top-4 duration-1000 -mt-16 relative z-10 opacity-90">
+          <div className="animate-in fade-in slide-in-from-top-4 duration-1000 mt-6 relative z-10 opacity-90">
             <InventoryBar 
               items={gameState.dealerInventory} 
               owner="Dealer" 
@@ -975,7 +981,6 @@ const App = () => {
               disabled={cryptoState.phase !== 'playing'}
               className="group relative px-8 py-4 bg-zinc-900 border border-zinc-700 text-zinc-300 text-[0.7rem] font-black uppercase tracking-widest hover:border-red-500 hover:text-red-400 transition-all active:scale-95 hover:shadow-[0_0_15px_rgba(220,38,38,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <div className="absolute -top-2 left-2 bg-zinc-900 px-1 text-[0.4rem] text-zinc-500">INPUT_01</div>
               Point at Self
             </button>
             <button 
@@ -985,7 +990,6 @@ const App = () => {
               disabled={cryptoState.phase !== 'playing'}
               className="group relative px-8 py-4 bg-zinc-900 border border-zinc-700 text-zinc-300 text-[0.7rem] font-black uppercase tracking-widest hover:border-red-500 hover:text-red-400 transition-all active:scale-95 hover:shadow-[0_0_15px_rgba(220,38,38,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <div className="absolute -top-2 left-2 bg-zinc-900 px-1 text-[0.4rem] text-zinc-500">INPUT_02</div>
               Point at Him
             </button>
           </div>
