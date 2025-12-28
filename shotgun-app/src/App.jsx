@@ -292,7 +292,8 @@ const App = () => {
     currentTurn: 'player',
     matchOver: false,
     seed,
-    itemsPerRound: 0
+  itemsPerRound: 0,
+  lastOutcome: null
   });
 
   const [gameState, setGameState] = useState(() => createInitialGameState());
@@ -422,7 +423,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
     return updated;
   };
 
-  const startRoundFromState = (state, extraMessages = []) => {
+  const startRoundFromState = (state, extraMessages = [], startTurn = 'player') => {
     const length = randomInt(2, 8);
     const liveCount = randomInt(1, length - 1);
     const blankCount = length - liveCount;
@@ -440,7 +441,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
     const playerInventory = addItemsToInventory(state.playerInventory, 'player', telemetry, itemsToGive);
     const dealerInventory = addItemsToInventory(state.dealerInventory, 'dealer', telemetry, itemsToGive);
-    const { updatedStatus, nextTurn, telemetry: skipMessages } = resolveSkips(state.statusEffects, 'player');
+    const { updatedStatus, nextTurn, telemetry: skipMessages } = resolveSkips(state.statusEffects, startTurn);
 
     return {
       ...state,
@@ -515,10 +516,12 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
     let nextState = { ...state };
     if (state.dealerHealth <= 0) {
       nextState.matchOver = true;
+    nextState.lastOutcome = 'player';
       telemetry.push("MATCH OVER: You win");
     setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
     } else if (state.playerHealth <= 0) {
       nextState.matchOver = true;
+    nextState.lastOutcome = 'dealer';
       telemetry.push("MATCH OVER: Dealer wins");
       setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
     }
@@ -579,13 +582,18 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       if (!isLive && shooter === target) {
         nextState.statusEffects[opponent].skipTurnsRemaining += 1;
         telemetry.push(`SELF BLANK: ${ACTOR_LABEL[opponent]} skips next turn`);
+      } else {
+        // No skip for other cases
       }
 
       nextState = concludeMatchIfNeeded(nextState, telemetry);
 
       if (!nextState.matchOver && currentShellIndex >= prev.chamber.length) {
+        const desiredNext = shooter === 'player' ? 'dealer' : 'player';
+        nextState.statusEffects = freshStatus();
+        nextState.currentTurn = desiredNext;
         nextState.log = pushTelemetry(prev.log, [...telemetry, `R${prev.round} END: Reloading...`]);
-        nextState = startRoundFromState(nextState);
+        nextState = startRoundFromState(nextState, [], desiredNext);
       } else {
         const desiredNext = shooter === 'player' ? 'dealer' : 'player';
         const { updatedStatus, nextTurn, telemetry: skipTelemetry } = resolveSkips(nextState.statusEffects, desiredNext);
@@ -772,6 +780,9 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
   const isPlayerTurn = cryptoState.phase === 'playing' && gameState.currentTurn === 'player' && !gameState.matchOver && !(playerLockUntil > Date.now());
   const isReloading = gameState.chamber.length > 0 && gameState.currentShellIndex >= gameState.chamber.length && !gameState.matchOver;
+  const turnLabel = cryptoState.phase === 'playing'
+    ? (gameState.currentTurn === 'player' ? 'Your Turn' : 'Dealer Turn')
+    : null;
 
   const dealerTakeTurn = () => {
     const latest = gameStateRef.current || gameState;
@@ -1211,19 +1222,28 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
       {/* --- GAME OVER MODAL --- */}
       {cryptoState.phase === 'game_over' && (
-          <div className="fixed inset-0 z-[200] bg-red-950/90 backdrop-blur-md flex items-center justify-center p-4">
+          <div className={`fixed inset-0 z-[200] ${gameState.lastOutcome === 'player' ? 'bg-green-950/90' : 'bg-red-950/90'} backdrop-blur-md flex items-center justify-center p-4`}>
               <div className="text-center animate-in zoom-in duration-300">
-                  <Skull className="w-24 h-24 text-black mx-auto mb-6 drop-shadow-[0_0_15px_rgba(0,0,0,0.8)]" />
-                  <h1 className="text-6xl font-black text-white tracking-tighter mb-2 text-shadow-aberration">YOU DIED</h1>
-                  <div className="text-red-300 font-mono tracking-widest text-sm mb-8">
-                      LOSS: {cryptoState.currentWager.toFixed(2)} ETH
+                  {gameState.lastOutcome === 'player' ? (
+                    <Trophy className="w-24 h-24 mx-auto mb-6 text-green-300 drop-shadow-[0_0_20px_rgba(34,197,94,0.6)]" />
+                  ) : (
+                    <Skull className="w-24 h-24 mx-auto mb-6 text-black drop-shadow-[0_0_15px_rgba(0,0,0,0.8)]" />
+                  )}
+                  <h1 className={`text-6xl font-black tracking-tighter mb-2 ${gameState.lastOutcome === 'player' ? 'text-green-100' : 'text-white'} text-shadow-aberration`}>
+                    {gameState.lastOutcome === 'player' ? 'YOU WIN' : 'YOU DIED'}
+                  </h1>
+                  <div className={`${gameState.lastOutcome === 'player' ? 'text-green-300' : 'text-red-300'} font-mono tracking-widest text-sm mb-8`}>
+                      {gameState.lastOutcome === 'player' ? 'Victory' : 'LOSS'}: {cryptoState.currentWager.toFixed(2)} ETH
                   </div>
                   <button 
                     onClick={() => {
                         setCryptoState(prev => ({ ...prev, currentWager: 0, phase: 'main_menu', multiplier: 1.0 })); // Reset to main menu
-                        setGameState(prev => ({...prev, round: 1, dealerHealth: 4, playerHealth: 4}));
+                        setGameState(prev => ({
+                          ...createInitialGameState(rngSeedRef.current),
+                          log: ["Session reset.", "Ready."]
+                        }));
                     }}
-                    className="px-8 py-3 bg-black text-red-500 border border-red-500/50 hover:bg-red-900/20 font-bold tracking-[0.2em] uppercase transition-all"
+                    className={`px-8 py-3 bg-black border font-bold tracking-[0.2em] uppercase transition-all ${gameState.lastOutcome === 'player' ? 'text-green-400 border-green-500/50 hover:bg-green-900/20' : 'text-red-500 border-red-500/50 hover:bg-red-900/20'}`}
                   >
                       Re-Initialize
                   </button>
@@ -1386,6 +1406,14 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
         {/* MIDDLE SECTION: THE SHOTGUN */}
         <div className="flex-1 flex items-center justify-center w-full max-w-3xl relative py-4 z-20 -mt-20">
+          {turnLabel && (
+            <div className="absolute -top-14 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1 bg-zinc-900/80 border border-zinc-700 text-[0.65rem] font-bold uppercase tracking-[0.2em] rounded-full shadow-[0_0_12px_rgba(0,0,0,0.4)]">
+              <span className={`w-2 h-2 rounded-full ${gameState.currentTurn === 'player' ? 'bg-green-400 shadow-[0_0_6px_rgba(74,222,128,0.8)]' : 'bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.8)]'}`} />
+              <span className={gameState.currentTurn === 'player' ? 'text-green-300' : 'text-red-300'}>
+                {turnLabel}
+              </span>
+            </div>
+          )}
           {isReloading && (
             <div className="absolute -top-6 left-1/2 -translate-x-1/2 px-3 py-1 bg-red-900/30 border border-red-500/50 text-red-300 text-[0.65rem] font-bold uppercase tracking-[0.2em] rounded shadow-[0_0_12px_rgba(220,38,38,0.4)]">
               Reloading...
