@@ -775,6 +775,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
   };
   const handleUseItem = (item) => {
     if (!item) return;
+    setActiveItem(null);
     handleItemUse('player', item);
   };
 
@@ -1227,7 +1228,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                   {gameState.lastOutcome === 'player' ? (
                     <Trophy className="w-24 h-24 mx-auto mb-6 text-green-300 drop-shadow-[0_0_20px_rgba(34,197,94,0.6)]" />
                   ) : (
-                    <Skull className="w-24 h-24 mx-auto mb-6 text-black drop-shadow-[0_0_15px_rgba(0,0,0,0.8)]" />
+                    <Skull className="w-24 h-24 mx-auto mb-6 text-white drop-shadow-[0_0_12px_rgba(255,255,255,0.6)]" />
                   )}
                   <h1 className={`text-6xl font-black tracking-tighter mb-2 ${gameState.lastOutcome === 'player' ? 'text-green-100' : 'text-white'} text-shadow-aberration`}>
                     {gameState.lastOutcome === 'player' ? 'YOU WIN' : 'YOU DIED'}
