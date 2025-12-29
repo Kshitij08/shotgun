@@ -779,11 +779,14 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
     handleItemUse('player', item);
   };
 
-  const isPlayerTurn = cryptoState.phase === 'playing' && gameState.currentTurn === 'player' && !gameState.matchOver && !(playerLockUntil > Date.now());
+  const isSawAnimating = effectOverlay === 'sawing';
+  const isPlayerTurn = cryptoState.phase === 'playing' && gameState.currentTurn === 'player' && !gameState.matchOver && !(playerLockUntil > Date.now()) && !isSawAnimating;
   const isReloading = gameState.chamber.length > 0 && gameState.currentShellIndex >= gameState.chamber.length && !gameState.matchOver;
   const turnLabel = cryptoState.phase === 'playing'
     ? (gameState.currentTurn === 'player' ? 'Your Turn' : 'Dealer Turn')
     : null;
+  const pendingPlayerSkips = gameState.statusEffects?.player?.skipTurnsRemaining || 0;
+  const pendingDealerSkips = gameState.statusEffects?.dealer?.skipTurnsRemaining || 0;
 
   const dealerTakeTurn = () => {
     const latest = gameStateRef.current || gameState;
@@ -800,6 +803,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       const current = gameStateRef.current || latest;
       return current.dealerInventory.find(it => it.kind === kind);
     };
+    const hasItem = (kind) => !!findItem(kind);
 
     const runIfDealerTurn = (fn) => {
       const current = gameStateRef.current || latest;
@@ -836,17 +840,22 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
     const knownShell = current.knowledge.dealer.currentShellKnown ? current.knowledge.dealer.knownCurrentShellType : null;
     const pLive = remaining > 0 ? current.liveShells / remaining : 0;
 
+    // Survival first: heal if critical
     if (current.dealerHealth <= 1 && useItem('CIGARETTES')) {
       scheduleDealerTurnDelay();
       return;
     }
-    if (!knownShell && useItem('MAGNIFYING_GLASS')) {
+
+    // If shell unknown and mid uncertainty, reveal first
+    if (!knownShell && remaining > 0 && pLive > 0.35 && pLive < 0.65 && useItem('MAGNIFYING_GLASS')) {
       scheduleDealerTurnDelay();
       return;
     }
 
+    // Known blank: exploit skip
     if (knownShell === 'BLANK') {
-      if (random() < 0.6) {
+      const selfBias = 0.75;
+      if (random() < selfBias) {
         aimAndShoot('dealer');
       } else {
         aimAndShoot('player');
@@ -854,24 +863,54 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       return;
     }
 
+    // Known live: go offensive, prime saw if it secures advantage
     if (knownShell === 'LIVE') {
       if (current.playerHealth <= 2 && useItem('HAND_SAW')) return;
       aimAndShoot('player');
       return;
     }
 
-    if (pLive > 0.6 && current.dealerHealth <= 2 && useItem('BEER')) {
+    // Unknown shell paths
+    // Use Skip when odds favor aggression and stalling helps
+    if (pLive >= 0.6 && current.playerHealth >= current.dealerHealth && useItem('SKIP')) {
       scheduleDealerTurnDelay();
       return;
     }
 
-    if (random() < 0.15 && useItem('SKIP')) {
+    // Prime saw if high live odds and player low HP
+    if (pLive >= 0.7 && current.playerHealth <= 2 && hasItem('HAND_SAW')) {
+      if (useItem('HAND_SAW')) return;
+    }
+
+    // Beer away dangerous live when dealer is low
+    if (pLive > 0.7 && current.dealerHealth <= 1 && useItem('BEER')) {
       scheduleDealerTurnDelay();
       return;
     }
 
-    const chooseSelf = (random() < 0.1 ? random() < 0.5 : pLive < 0.5);
-    aimAndShoot(chooseSelf ? 'dealer' : 'player');
+    // High live odds: shoot player
+    if (pLive >= 0.7) {
+      aimAndShoot('player');
+      return;
+    }
+
+    // Low live odds: shoot self to earn skip
+    if (pLive <= 0.3) {
+      aimAndShoot('dealer');
+      return;
+    }
+
+    // Mid odds: if glass available, use it; otherwise bias toward player
+    if (hasItem('MAGNIFYING_GLASS') && useItem('MAGNIFYING_GLASS')) {
+      scheduleDealerTurnDelay();
+      return;
+    }
+
+    if (random() < 0.65) {
+      aimAndShoot('player');
+    } else {
+      aimAndShoot('dealer');
+    }
   };
 
   useEffect(() => {
@@ -1387,11 +1426,27 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         {/* MIDDLE SECTION: THE SHOTGUN */}
         <div className="flex-1 flex items-center justify-center w-full max-w-3xl relative py-4 z-20 -mt-20">
           {turnLabel && (
-            <div className="absolute -top-14 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1 bg-zinc-900/80 border border-zinc-700 text-[0.65rem] font-bold uppercase tracking-[0.2em] rounded-full shadow-[0_0_12px_rgba(0,0,0,0.4)]">
-              <span className={`w-2 h-2 rounded-full ${gameState.currentTurn === 'player' ? 'bg-green-400 shadow-[0_0_6px_rgba(74,222,128,0.8)]' : 'bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.8)]'}`} />
-              <span className={gameState.currentTurn === 'player' ? 'text-green-300' : 'text-red-300'}>
-                {turnLabel}
-              </span>
+            <div className="absolute -top-14 left-1/2 -translate-x-1/2 flex items-center gap-3 px-4 py-1 bg-zinc-900/80 border border-zinc-700 text-[0.65rem] font-bold uppercase tracking-[0.2em] rounded-full shadow-[0_0_12px_rgba(0,0,0,0.4)]">
+              <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${gameState.currentTurn === 'player' ? 'bg-green-400 shadow-[0_0_6px_rgba(74,222,128,0.8)]' : 'bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.8)]'}`} />
+                <span className={gameState.currentTurn === 'player' ? 'text-green-300' : 'text-red-300'}>
+                  {turnLabel}
+                </span>
+              </div>
+              {(pendingPlayerSkips > 0 || pendingDealerSkips > 0) && (
+                <div className="flex items-center gap-2 text-[0.6rem] text-zinc-300">
+                  {pendingPlayerSkips > 0 && (
+                    <span className="px-2 py-0.5 rounded-full bg-green-900/40 border border-green-500/40 text-green-200">
+                      You skip: {pendingPlayerSkips}
+                    </span>
+                  )}
+                  {pendingDealerSkips > 0 && (
+                    <span className="px-2 py-0.5 rounded-full bg-red-900/40 border border-red-500/40 text-red-200">
+                      Dealer skip: {pendingDealerSkips}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           )}
           {isReloading && (
