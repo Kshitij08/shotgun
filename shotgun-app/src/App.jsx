@@ -989,7 +989,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
   const InventoryBar = ({ items, owner, max = 4, onHover, onUse }) => (
     <div className="flex flex-col items-center gap-2">
-      <div className="text-[0.5rem] text-zinc-400 tracking-[0.3em] uppercase font-bold text-shadow-glow">
+      <div className="text-[0.65rem] text-zinc-300 tracking-[0.32em] uppercase font-bold text-shadow-glow">
         {owner} Items
       </div>
       <div className="flex gap-2 p-2 bg-zinc-900/80 border border-zinc-700 rounded-lg backdrop-blur-sm shadow-[0_0_20px_rgba(20,0,0,0.5)]">
@@ -1308,14 +1308,14 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
         {/* --- ECONOMY HUD --- */}
         <div className="flex flex-col items-center">
-          <div className="text-xs font-black tracking-[0.3em] uppercase mb-1 flex items-center gap-2 drop-shadow-[0_0_8px_rgba(220,38,38,0.5)]">
+          <div className="text-base font-black tracking-[0.35em] uppercase mb-3 flex items-center gap-3 drop-shadow-[0_0_8px_rgba(220,38,38,0.5)]">
             <span className="text-red-500">Round {gameState.round}</span>
             <span className="text-zinc-600">•</span>
             <span className="text-zinc-400">Rate:</span>
             <span className="text-white">2x</span>
           </div>
-          <div className="text-[0.6rem] text-zinc-400 font-bold">
-            <span className="text-red-500 drop-shadow-[0_0_8px_rgba(220,38,38,0.6)]">LIVE: {gameState.liveShells}</span> <span className="mx-2 opacity-30">|</span> <span className="text-zinc-500">BLANK: {gameState.blankShells}</span>
+          <div className="text-sm text-zinc-300 font-bold">
+            <span className="text-red-400 drop-shadow-[0_0_8px_rgba(220,38,38,0.6)]">LIVE: {gameState.liveShells}</span> <span className="mx-2 opacity-30">|</span> <span className="text-zinc-400">BLANK: {gameState.blankShells}</span>
           </div>
         </div>
 
@@ -1652,11 +1652,11 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
         {/* Side Logs */}
         <div className="absolute left-8 top-1/2 -translate-y-1/2 w-56 border-l border-zinc-800/50 pl-4 hidden lg:flex opacity-80 hover:opacity-100 transition-opacity max-h-64 overflow-y-auto flex-col justify-end space-y-3">
-           <div className="text-[0.5rem] text-zinc-500 tracking-widest font-black uppercase border-b border-zinc-800/50 pb-1 text-shadow-sm">Telemetry</div>
+           <div className="text-[0.65rem] text-zinc-500 tracking-widest font-black uppercase border-b border-zinc-800/50 pb-1 text-shadow-sm">Telemetry</div>
            {gameState.log.map((log, i) => {
              const isLatest = i === gameState.log.length - 1;
              return (
-               <div key={i} className={`text-[0.6rem] ${isLatest ? 'text-red-400 font-bold animate-pulse-slow' : 'text-zinc-400'} leading-tight tracking-tight`}>
+               <div key={i} className={`text-[0.75rem] ${isLatest ? 'text-red-400 font-bold animate-pulse-slow' : 'text-zinc-300'} leading-tight tracking-tight`}>
                  {(log ?? '').toString().toUpperCase()}
                </div>
              );
