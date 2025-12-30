@@ -354,6 +354,23 @@ const App = () => {
   const [gameState, setGameState] = useState(() => createInitialGameState());
 
   const [hoveredInventoryItem, setHoveredInventoryItem] = useState(null); // For inventory item tooltips
+  const hoverTimeoutRef = useRef(null);
+  
+  // Debounced hover clear - prevents flicker when moving between items
+  const clearHoverWithDelay = () => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    hoverTimeoutRef.current = setTimeout(() => {
+      setHoveredInventoryItem(null);
+    }, 100);
+  };
+  
+  const setHoverItem = (item) => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    setHoveredInventoryItem(item);
+  };
   const [aimingAt, setAimingAt] = useState(null); 
   const [shotEffect, setShotEffect] = useState(null); 
   const [shell, setShell] = useState(null); 
@@ -1158,7 +1175,11 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
   };
   const handleUseItem = (item) => {
     if (!item) return;
-    // Clear hover state when item is used
+    // Clear hover state immediately when item is used
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
     setHoveredInventoryItem(null);
     handleItemUse('player', item);
   };
@@ -1430,18 +1451,12 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       </div>
         </button>
   );
-
-  const InventoryBar = ({ items, owner, max = 4, onUse, isPlayer = false }) => {
-    // Track which slot index is currently hovered (more reliable than item id)
-    const [hoveredSlot, setHoveredSlot] = useState(null);
-    
+  // Render inventory bar inline to avoid component recreation issues
+  const renderInventoryBar = (items, owner, max, onUse, isPlayer) => {
     return (
       <div 
         className="flex flex-col items-center gap-2"
-        onMouseLeave={() => {
-          setHoveredSlot(null);
-          setHoveredInventoryItem(null);
-        }}
+        onMouseLeave={clearHoverWithDelay}
       >
         <div className="text-[0.65rem] text-zinc-300 tracking-[0.32em] uppercase font-bold text-shadow-glow">
           {owner} Items
@@ -1449,22 +1464,23 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         <div className="flex gap-2 p-2 bg-zinc-900/80 border border-zinc-700 rounded-lg backdrop-blur-sm shadow-[0_0_20px_rgba(20,0,0,0.5)]">
           {[...Array(max)].map((_, i) => {
             const item = items[i];
-            const isHovered = hoveredSlot === i && item;
+            // Check hover by comparing item id
+            const isHovered = item && hoveredInventoryItem && hoveredInventoryItem.id === item.id;
             return (
               <div 
                 key={i}
                 onClick={() => {
                   if (isPlayer && item && onUse) {
-                    setHoveredSlot(null);
+                    // Immediately clear on use
+                    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
                     setHoveredInventoryItem(null);
                     onUse(item);
                   }
                 }}
                 onMouseEnter={() => {
-                  setHoveredSlot(i);
-                  if (item) setHoveredInventoryItem(item);
-                  else setHoveredInventoryItem(null);
+                  if (item) setHoverItem(item);
                 }}
+                onMouseLeave={clearHoverWithDelay}
                 className={`w-12 h-12 border flex items-center justify-center transition-all duration-200 relative overflow-hidden rounded-md
                   ${item 
                     ? `bg-zinc-800 shadow-inner ${isPlayer ? 'cursor-pointer' : 'cursor-default'} ${isHovered ? 'border-red-500 scale-110 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'border-red-500/50 hover:border-red-400'}`
@@ -1929,12 +1945,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           </div>
 
           <div className="animate-in fade-in slide-in-from-top-4 duration-1000 mt-6 relative z-10 opacity-90">
-            <InventoryBar 
-              items={gameState.dealerInventory} 
-              owner="Dealer" 
-              max={4} 
-              isPlayer={false}
-            />
+            {renderInventoryBar(gameState.dealerInventory, "Dealer", 4, null, false)}
           </div>
         </div>
 
@@ -2300,13 +2311,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               )}
             </div>
             
-            <InventoryBar 
-              items={gameState.playerInventory} 
-              owner="Player" 
-              max={4} 
-              onUse={isPlayerTurn ? handleUseItem : undefined}
-              isPlayer={true}
-            />
+            {renderInventoryBar(gameState.playerInventory, "Player", 4, isPlayerTurn ? handleUseItem : null, true)}
           </div>
         </div>
 
