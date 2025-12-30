@@ -24,7 +24,12 @@ import {
   Swords, 
   Trophy, 
   HelpCircle,
-  Disc
+  Disc,
+  Shield,
+  Trash2,
+  HandMetal,
+  RefreshCw,
+  Pill
 } from 'lucide-react';
 
 // Custom Saw Icon Component
@@ -63,6 +68,25 @@ const SkipIcon = ({ className }) => (
   </svg>
 );
 
+// Custom Inverter Icon
+const InverterIcon = ({ className }) => (
+  <svg 
+    xmlns="http://www.w3.org/2000/svg" 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    stroke="currentColor" 
+    strokeWidth="2" 
+    strokeLinecap="round" 
+    strokeLinejoin="round" 
+    className={className}
+  >
+    <path d="M7 16V4l-4 4" />
+    <path d="M17 8v12l4-4" />
+    <circle cx="7" cy="19" r="2" fill="currentColor" />
+    <circle cx="17" cy="5" r="2" fill="currentColor" />
+  </svg>
+);
+
 // Custom Discord Icon (Official Shape)
 const DiscordIcon = ({ className }) => (
   <svg 
@@ -96,32 +120,62 @@ const ITEM_CONFIG = {
   MAGNIFYING_GLASS: {
     label: 'Magnifying Glass',
     description: 'Reveal current shell',
-    weight: 0.25,
+    weight: 0.10,
     icon: <Search className="w-5 h-5" />
   },
   BEER: {
     label: 'Beer',
     description: 'Eject current shell',
-    weight: 0.25,
+    weight: 0.10,
     icon: <Beer className="w-5 h-5" />
   },
   HAND_SAW: {
     label: 'Hand Saw',
-    description: 'Next shot deals double damage',
-    weight: 0.20,
+    description: 'Next shot deals 2x damage',
+    weight: 0.10,
     icon: <SawIcon className="w-5 h-5" />
   },
   SKIP: {
     label: 'Skip',
-    description: 'Opponent skips their next turn',
-    weight: 0.15,
+    description: 'Opponent skips next turn',
+    weight: 0.10,
     icon: <SkipIcon className="w-5 h-5" />
   },
   CIGARETTES: {
     label: 'Cigarettes',
-    description: 'Heal 1 HP',
-    weight: 0.15,
+    description: 'Heal 1 HP (max 4)',
+    weight: 0.10,
     icon: <Cigarette className="w-5 h-5" />
+  },
+  SHIELD: {
+    label: 'Shield',
+    description: 'Block next 1 damage',
+    weight: 0.10,
+    icon: <Shield className="w-5 h-5" />
+  },
+  SHAKE_DOWN: {
+    label: 'Shake Down',
+    description: 'Destroy random opponent item',
+    weight: 0.10,
+    icon: <Trash2 className="w-5 h-5" />
+  },
+  STEAL: {
+    label: 'Steal',
+    description: 'Steal random item from opponent',
+    weight: 0.10,
+    icon: <HandMetal className="w-5 h-5" />
+  },
+  INVERTER: {
+    label: 'Inverter',
+    description: 'Swap current shell polarity',
+    weight: 0.10,
+    icon: <InverterIcon className="w-5 h-5" />
+  },
+  RANDOM_PILL: {
+    label: 'Random Pill',
+    description: '50% heal 2 HP or take 1 damage',
+    weight: 0.10,
+    icon: <Pill className="w-5 h-5" />
   }
 };
 
@@ -141,8 +195,8 @@ const freshStatus = () => ({
 });
 
 const freshTempEffects = () => ({
-  player: { doubleDamageNextShot: false },
-  dealer: { doubleDamageNextShot: false }
+  player: { doubleDamageNextShot: false, shieldNextDamage: 0 },
+  dealer: { doubleDamageNextShot: false, shieldNextDamage: 0 }
 });
 
 const pushTelemetry = (prevLog, messages) => {
@@ -299,7 +353,7 @@ const App = () => {
 
   const [gameState, setGameState] = useState(() => createInitialGameState());
 
-  const [activeItem, setActiveItem] = useState(null);
+  const [hoveredInventoryItem, setHoveredInventoryItem] = useState(null); // For inventory item tooltips
   const [aimingAt, setAimingAt] = useState(null); 
   const [shotEffect, setShotEffect] = useState(null); 
   const [shell, setShell] = useState(null); 
@@ -314,6 +368,7 @@ const App = () => {
   const dealerTimerRef = useRef(null);
   const wheelStateRef = useRef(null);
   const spinLockRef = useRef(false); // Prevents double-spin race condition
+  const [hoveredWheelItem, setHoveredWheelItem] = useState(null); // For wheel item tooltips
   const [wheelState, setWheelState] = useState({
     active: false,
     queue: [],
@@ -587,6 +642,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       blankShells: blankCount,
       currentShellIndex: 0,
       knowledge: freshKnowledge(),
+      tempEffects: freshTempEffects(), // Reset temp effects at round start
       playerInventory: state.playerInventory,
       dealerInventory: state.dealerInventory,
       statusEffects: updatedStatus,
@@ -681,12 +737,21 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
       const tempEffects = {
         ...prev.tempEffects,
-        [shooter]: { ...prev.tempEffects[shooter], doubleDamageNextShot: false }
+        [shooter]: { ...prev.tempEffects[shooter], doubleDamageNextShot: false },
+        [target]: { ...prev.tempEffects[target] }
       };
 
       let damage = isLive ? 1 : 0;
       if (isLive && prev.tempEffects[shooter]?.doubleDamageNextShot) {
         damage = 2;
+      }
+      
+      // Duct Tape: Negate damage if target has shield active
+      if (isLive && damage > 0 && prev.tempEffects[target]?.shieldNextDamage > 0) {
+        const shieldAmount = Math.min(damage, prev.tempEffects[target].shieldNextDamage);
+        damage -= shieldAmount;
+        tempEffects[target].shieldNextDamage = prev.tempEffects[target].shieldNextDamage - shieldAmount;
+        telemetry.push(`${ACTOR_LABEL[target]}: Duct Tape blocked ${shieldAmount} damage!`);
       }
 
       const statusEffects = {
@@ -821,8 +886,8 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         dealer: { ...prev.statusEffects.dealer }
       };
       const tempEffects = {
-        ...prev.tempEffects,
-        [actor]: { ...prev.tempEffects[actor] }
+        player: { ...prev.tempEffects.player },
+        dealer: { ...prev.tempEffects.dealer }
       };
       let knowledge = { ...prev.knowledge };
       let liveShells = prev.liveShells;
@@ -850,6 +915,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
       const remainingShells = prev.chamber.length - prev.currentShellIndex;
       const currentShellType = prev.chamber[prev.currentShellIndex];
+      let chamber = prev.chamber; // May be modified by Inverter
 
       switch (item.kind) {
         case 'CIGARETTES': {
@@ -917,12 +983,132 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           telemetry.push(`${ACTOR_LABEL[actor]}: Skip → ${ACTOR_LABEL[opponent]} loses a turn`);
           break;
         }
+        case 'SHIELD': {
+          // Add shield to block next 1 damage
+          tempEffects[actor] = { ...tempEffects[actor], shieldNextDamage: (tempEffects[actor]?.shieldNextDamage || 0) + 1 };
+          telemetry.push(`${ACTOR_LABEL[actor]}: Shield → blocked for 1 damage`);
+          if (actor === 'player') {
+            setEffectOverlay('shield');
+            setTimeout(() => setEffectOverlay(null), 1000);
+          }
+          break;
+        }
+        case 'SHAKE_DOWN': {
+          // Remove random item from opponent
+          const opponentInventoryKey = opponent === 'player' ? 'playerInventory' : 'dealerInventory';
+          const opponentItems = opponent === 'player' ? playerInventory : dealerInventory;
+          if (opponentItems.length === 0) {
+            telemetry.push(`${ACTOR_LABEL[actor]}: Shake Down → ${ACTOR_LABEL[opponent]} has no items!`);
+          } else {
+            const idx = Math.floor(random() * opponentItems.length);
+            const removedItem = opponentItems[idx];
+            const newOpponentInventory = opponentItems.filter((_, i) => i !== idx);
+            if (opponent === 'player') {
+              playerInventory = newOpponentInventory;
+            } else {
+              dealerInventory = newOpponentInventory;
+            }
+            telemetry.push(`${ACTOR_LABEL[actor]}: Shake Down → destroyed ${ACTOR_LABEL[opponent]}'s ${ITEM_CONFIG[removedItem.kind]?.label || 'item'}`);
+          }
+          break;
+        }
+        case 'STEAL': {
+          // Steal random item from opponent
+          const stealOpponentKey = opponent === 'player' ? 'playerInventory' : 'dealerInventory';
+          const stealOpponentItems = opponent === 'player' ? playerInventory : dealerInventory;
+          const actorItems = actor === 'player' ? playerInventory : dealerInventory;
+          if (stealOpponentItems.length === 0) {
+            telemetry.push(`${ACTOR_LABEL[actor]}: Steal → ${ACTOR_LABEL[opponent]} has no items!`);
+          } else {
+            const stealIdx = Math.floor(random() * stealOpponentItems.length);
+            const stolenItem = stealOpponentItems[stealIdx];
+            const newStealOpponentInventory = stealOpponentItems.filter((_, i) => i !== stealIdx);
+            let newActorInventory = [...actorItems, stolenItem];
+            
+            // If actor would exceed max, discard oldest to make room
+            while (newActorInventory.length > MAX_INVENTORY) {
+              newActorInventory.shift();
+              telemetry.push(`${ACTOR_LABEL[actor]}: Inventory full → discarded oldest item`);
+            }
+            
+            if (opponent === 'player') {
+              playerInventory = newStealOpponentInventory;
+            } else {
+              dealerInventory = newStealOpponentInventory;
+            }
+            if (actor === 'player') {
+              playerInventory = newActorInventory;
+            } else {
+              dealerInventory = newActorInventory;
+            }
+            telemetry.push(`${ACTOR_LABEL[actor]}: Steal → stole ${ITEM_CONFIG[stolenItem.kind]?.label || 'item'} from ${ACTOR_LABEL[opponent]}`);
+          }
+          break;
+        }
+        case 'INVERTER': {
+          // Swap current shell polarity (LIVE <-> BLANK)
+          if (remainingShells <= 0) {
+            telemetry.push(`${ACTOR_LABEL[actor]}: Inverter → chamber empty`);
+          } else {
+            const oldType = currentShellType;
+            const newType = oldType === 'LIVE' ? 'BLANK' : 'LIVE';
+            // Modify chamber - create new array with swapped shell
+            chamber = [...prev.chamber];
+            chamber[prev.currentShellIndex] = newType;
+            // Update shell counts
+            if (oldType === 'LIVE') {
+              liveShells = prev.liveShells - 1;
+              blankShells = prev.blankShells + 1;
+            } else {
+              liveShells = prev.liveShells + 1;
+              blankShells = prev.blankShells - 1;
+            }
+            // Reset knowledge since shell changed
+            knowledge = freshKnowledge();
+            telemetry.push(`${ACTOR_LABEL[actor]}: Inverter → shell polarity swapped`);
+          }
+          break;
+        }
+        case 'RANDOM_PILL': {
+          // 50% chance to heal 2 HP or take 1 damage
+          const pillRoll = random();
+          const isPlayer = actor === 'player';
+          if (pillRoll < 0.5) {
+            // Heal 2 HP (capped at max)
+            const newHp = clampHp((isPlayer ? playerHealth : dealerHealth) + 2);
+            if (isPlayer) {
+              playerHealth = newHp;
+            } else {
+              dealerHealth = newHp;
+            }
+            telemetry.push(`${ACTOR_LABEL[actor]}: Random Pill → healed 2 HP! (now ${newHp})`);
+            if (isPlayer) {
+              setEffectOverlay('heal');
+              setTimeout(() => setEffectOverlay(null), 1000);
+            }
+          } else {
+            // Take 1 damage
+            const newHp = clampHp((isPlayer ? playerHealth : dealerHealth) - 1);
+            if (isPlayer) {
+              playerHealth = newHp;
+            } else {
+              dealerHealth = newHp;
+            }
+            telemetry.push(`${ACTOR_LABEL[actor]}: Random Pill → took 1 damage! (now ${newHp})`);
+            if (isPlayer) {
+              setEffectOverlay('damage');
+              setTimeout(() => setEffectOverlay(null), 1000);
+            }
+          }
+          break;
+        }
         default:
           break;
       }
 
       let nextState = {
         ...prev,
+        chamber,
         playerInventory,
         dealerInventory,
         statusEffects,
@@ -934,6 +1120,13 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         playerHealth,
         dealerHealth
       };
+
+      // Check for match conclusion (Random Pill can kill)
+      nextState = concludeMatchIfNeeded(nextState, telemetry);
+      if (nextState.matchOver) {
+        nextState.log = pushTelemetry(prev.log, telemetry);
+        return nextState;
+      }
 
       if (currentShellIndex >= prev.chamber.length && prev.chamber.length > 0) {
         nextState.log = pushTelemetry(prev.log, [...telemetry, `R${prev.round} END: Reloading...`]);
@@ -965,7 +1158,8 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
   };
   const handleUseItem = (item) => {
     if (!item) return;
-    setActiveItem(null);
+    // Clear hover state when item is used
+    setHoveredInventoryItem(null);
     handleItemUse('player', item);
   };
 
@@ -1032,8 +1226,33 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
     const knownShell = current.knowledge.dealer.currentShellKnown ? current.knowledge.dealer.knownCurrentShellType : null;
     const pLive = remaining > 0 ? current.liveShells / remaining : 0;
 
-    // Survival first: heal if critical
-    if (current.dealerHealth <= 1 && useItem('CIGARETTES')) {
+    // Survival first: heal if critical (Cigarettes or Random Pill as backup)
+    if (current.dealerHealth <= 1) {
+      if (useItem('CIGARETTES')) {
+        scheduleDealerTurnDelay();
+        return;
+      }
+      // Use Shield for emergency protection
+      if (hasItem('SHIELD') && pLive >= 0.5 && useItem('SHIELD')) {
+        scheduleDealerTurnDelay();
+        return;
+      }
+    }
+
+    // Random Pill: use when low HP (risky but worth it)
+    if (current.dealerHealth <= 2 && hasItem('RANDOM_PILL') && random() < 0.4 && useItem('RANDOM_PILL')) {
+      scheduleDealerTurnDelay();
+      return;
+    }
+
+    // Steal from player if they have useful items and we're not full
+    if (current.playerInventory.length > 0 && current.dealerInventory.length < MAX_INVENTORY && random() < 0.3 && useItem('STEAL')) {
+      scheduleDealerTurnDelay();
+      return;
+    }
+
+    // Shake Down: destroy player item if they have items
+    if (current.playerInventory.length >= 2 && random() < 0.25 && useItem('SHAKE_DOWN')) {
       scheduleDealerTurnDelay();
       return;
     }
@@ -1044,8 +1263,14 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       return;
     }
 
-    // Known blank: exploit skip
+    // Known blank: use Inverter to make it live, or shoot self for skip
     if (knownShell === 'BLANK') {
+      // Use Inverter if player is low HP - turn blank into live and shoot them
+      if (current.playerHealth <= 2 && hasItem('INVERTER') && useItem('INVERTER')) {
+        scheduleDealerTurnDelay();
+        return;
+      }
+      // Otherwise exploit blank for skip advantage
       const selfBias = 0.75;
       if (random() < selfBias) {
         aimAndShoot('dealer');
@@ -1057,7 +1282,20 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
     // Known live: go offensive, prime saw if it secures advantage
     if (knownShell === 'LIVE') {
-      if (current.playerHealth <= 2 && useItem('HAND_SAW')) return;
+      // Use Inverter to make it blank and shoot self for skip if dealer is low HP
+      if (current.dealerHealth <= 1 && hasItem('INVERTER') && useItem('INVERTER')) {
+        scheduleDealerTurnDelay();
+        return;
+      }
+      if (current.playerHealth <= 2 && useItem('HAND_SAW')) {
+        scheduleDealerTurnDelay();
+        return;
+      }
+      // Use Shield before shooting if player might retaliate
+      if (current.playerHealth >= current.dealerHealth && hasItem('SHIELD') && random() < 0.3 && useItem('SHIELD')) {
+        scheduleDealerTurnDelay();
+        return;
+      }
       aimAndShoot('player');
       return;
     }
@@ -1071,7 +1309,10 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
     // Prime saw if high live odds and player low HP
     if (pLive >= 0.7 && current.playerHealth <= 2 && hasItem('HAND_SAW')) {
-      if (useItem('HAND_SAW')) return;
+      if (useItem('HAND_SAW')) {
+        scheduleDealerTurnDelay();
+        return;
+      }
     }
 
     // Beer away dangerous live when dealer is low
@@ -1190,36 +1431,60 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         </button>
   );
 
-  const InventoryBar = ({ items, owner, max = 4, onHover, onUse }) => (
-    <div className="flex flex-col items-center gap-2">
-      <div className="text-[0.65rem] text-zinc-300 tracking-[0.32em] uppercase font-bold text-shadow-glow">
-        {owner} Items
+  const InventoryBar = ({ items, owner, max = 4, onUse, isPlayer = false }) => {
+    // Track which slot index is currently hovered (more reliable than item id)
+    const [hoveredSlot, setHoveredSlot] = useState(null);
+    
+    return (
+      <div 
+        className="flex flex-col items-center gap-2"
+        onMouseLeave={() => {
+          setHoveredSlot(null);
+          setHoveredInventoryItem(null);
+        }}
+      >
+        <div className="text-[0.65rem] text-zinc-300 tracking-[0.32em] uppercase font-bold text-shadow-glow">
+          {owner} Items
+        </div>
+        <div className="flex gap-2 p-2 bg-zinc-900/80 border border-zinc-700 rounded-lg backdrop-blur-sm shadow-[0_0_20px_rgba(20,0,0,0.5)]">
+          {[...Array(max)].map((_, i) => {
+            const item = items[i];
+            const isHovered = hoveredSlot === i && item;
+            return (
+              <div 
+                key={i}
+                onClick={() => {
+                  if (isPlayer && item && onUse) {
+                    setHoveredSlot(null);
+                    setHoveredInventoryItem(null);
+                    onUse(item);
+                  }
+                }}
+                onMouseEnter={() => {
+                  setHoveredSlot(i);
+                  if (item) setHoveredInventoryItem(item);
+                  else setHoveredInventoryItem(null);
+                }}
+                className={`w-12 h-12 border flex items-center justify-center transition-all duration-200 relative overflow-hidden rounded-md
+                  ${item 
+                    ? `bg-zinc-800 shadow-inner ${isPlayer ? 'cursor-pointer' : 'cursor-default'} ${isHovered ? 'border-red-500 scale-110 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'border-red-500/50 hover:border-red-400'}`
+                    : 'bg-transparent border-zinc-800 text-zinc-700'
+                  }`}
+              >
+                {item ? (
+                  <div className={`transition-colors duration-200 ${isHovered ? 'text-red-400' : 'text-zinc-200'}`}>
+                    {React.cloneElement(item.icon, { className: "w-5 h-5" })}
+                  </div>
+                ) : (
+                  <div className="w-1 h-1 bg-zinc-700 rounded-full" />
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
-      <div className="flex gap-2 p-2 bg-zinc-900/80 border border-zinc-700 rounded-lg backdrop-blur-sm shadow-[0_0_20px_rgba(20,0,0,0.5)]">
-        {[...Array(max)].map((_, i) => {
-          const item = items[i];
-          return (
-            <div 
-              key={i}
-              onClick={() => owner === 'Player' && item && onUse && onUse(item)}
-              onMouseEnter={() => item && onHover(item)}
-              onMouseLeave={() => onHover(null)}
-              className={`w-12 h-12 border flex items-center justify-center transition-all duration-300 relative group overflow-hidden
-                ${item 
-                  ? 'bg-zinc-800 border-red-500/50 hover:border-red-400 cursor-pointer text-zinc-200 hover:text-red-400 shadow-inner' 
-                  : 'bg-transparent border-zinc-800 text-zinc-700'
-                } rounded-md`}
-            >
-              {item ? item.icon : <div className="w-1 h-1 bg-zinc-700 rounded-full" />}
-              {item && (
-                <div className="absolute inset-0 bg-red-500/10 opacity-0 group-hover:opacity-100 transition-opacity animate-pulse" />
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
+    );
+  };
 
   const HealthBar = ({ health, max = 4, side = 'left' }) => (
     <div className={`flex items-center gap-2 ${side === 'right' ? 'flex-row-reverse' : ''}`}>
@@ -1253,6 +1518,37 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
             <div className="absolute bottom-[-10%] left-1/2 w-48 h-48 bg-zinc-500/20 rounded-full blur-[50px] animate-smoke-particle-2" />
             <div className="absolute bottom-0 right-1/3 w-40 h-40 bg-zinc-300/10 rounded-full blur-[30px] animate-smoke-particle-3" />
             <div className="absolute inset-0 bg-zinc-500/5 mix-blend-overlay animate-smoke-fade" />
+        </div>
+      )}
+
+      {/* Duct Tape Shield Effect */}
+      {effectOverlay === 'shield' && (
+        <div className="fixed inset-0 z-[80] pointer-events-none overflow-hidden">
+            <div className="absolute inset-0 bg-blue-500/10 animate-pulse" />
+            <div className="absolute inset-[20%] border-4 border-blue-400/50 rounded-full animate-ping" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Shield className="w-32 h-32 text-blue-400/60 animate-bounce" />
+            </div>
+        </div>
+      )}
+
+      {/* Random Pill Heal Effect */}
+      {effectOverlay === 'heal' && (
+        <div className="fixed inset-0 z-[80] pointer-events-none overflow-hidden">
+            <div className="absolute inset-0 bg-green-500/15 animate-pulse" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="text-6xl font-black text-green-400 animate-bounce drop-shadow-[0_0_20px_rgba(74,222,128,0.6)]">+2 HP</div>
+            </div>
+        </div>
+      )}
+
+      {/* Random Pill Damage Effect */}
+      {effectOverlay === 'damage' && (
+        <div className="fixed inset-0 z-[80] pointer-events-none overflow-hidden">
+            <div className="absolute inset-0 bg-red-500/20 animate-flash-out" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="text-6xl font-black text-red-400 animate-bounce drop-shadow-[0_0_20px_rgba(248,113,113,0.6)]">-1 HP</div>
+            </div>
         </div>
       )}
 
@@ -1505,7 +1801,15 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           </div>
           <div>
             <div className="text-[0.65rem] text-red-500 font-bold tracking-tighter mb-1 text-shadow-aberration">UNIT_PLAYER_01</div>
-            <HealthBar health={gameState.playerHealth} />
+            <div className="flex items-center gap-2">
+              <HealthBar health={gameState.playerHealth} />
+              {gameState.tempEffects?.player?.shieldNextDamage > 0 && (
+                <div className="flex items-center gap-1 px-2 py-1 bg-blue-900/30 border border-blue-500/50 rounded text-blue-400 animate-pulse">
+                  <Shield className="w-3 h-3" />
+                  <span className="text-[0.6rem] font-bold">{gameState.tempEffects.player.shieldNextDamage}</span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1531,7 +1835,15 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           </div>
           <div className="text-right">
             <div className="text-[0.65rem] text-red-500 font-bold tracking-tighter mb-1 text-shadow-aberration">THE_DEALER</div>
-            <HealthBar health={gameState.dealerHealth} side="right" />
+            <div className="flex items-center gap-2 justify-end">
+              {gameState.tempEffects?.dealer?.shieldNextDamage > 0 && (
+                <div className="flex items-center gap-1 px-2 py-1 bg-blue-900/30 border border-blue-500/50 rounded text-blue-400 animate-pulse">
+                  <Shield className="w-3 h-3" />
+                  <span className="text-[0.6rem] font-bold">{gameState.tempEffects.dealer.shieldNextDamage}</span>
+                </div>
+              )}
+              <HealthBar health={gameState.dealerHealth} side="right" />
+            </div>
           </div>
         </div>
       </header>
@@ -1621,7 +1933,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               items={gameState.dealerInventory} 
               owner="Dealer" 
               max={4} 
-              onHover={setActiveItem} 
+              isPlayer={false}
             />
           </div>
         </div>
@@ -1682,28 +1994,51 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                 transitionTimingFunction: 'cubic-bezier(0.15, 0.85, 0.35, 1)'
               }}
             >
+              {/* Divider lines first */}
               {wheelState.pool.map((kind, idx) => {
                 const segmentAngle = 360 / (wheelState.pool.length || 1);
                 const angle = segmentAngle * idx;
-                const contentRotation = angle + segmentAngle / 2;
-                const icon = ITEM_CONFIG[kind].icon;
                 return (
-                  <React.Fragment key={kind}>
+                  <div 
+                    key={`divider-${kind}`}
+                    className="absolute top-0 left-1/2 -translate-x-1/2 w-0.5 h-1/2 bg-zinc-800 origin-bottom"
+                    style={{ transform: `rotate(${angle}deg)`, zIndex: 1 }}
+                  />
+                );
+              })}
+              {/* Icon buttons - rendered separately to avoid overlap issues */}
+              {wheelState.pool.map((kind, idx) => {
+                const segmentAngle = 360 / (wheelState.pool.length || 1);
+                const contentRotation = (segmentAngle * idx) + (segmentAngle / 2);
+                const iconConfig = ITEM_CONFIG[kind];
+                if (!iconConfig) return null;
+                const isHovered = hoveredWheelItem === kind;
+                // Calculate position on the wheel edge (radius ~140px from center of 192px wheel)
+                const radius = 140;
+                const radians = (contentRotation - 90) * (Math.PI / 180);
+                const x = Math.cos(radians) * radius;
+                const y = Math.sin(radians) * radius;
+                return (
+                  <div 
+                    key={`icon-${kind}`}
+                    className="absolute"
+                    style={{ 
+                      left: '50%',
+                      top: '50%',
+                      transform: `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`,
+                      zIndex: isHovered ? 100 : 10
+                    }}
+                  >
                     <div 
-                      className="absolute top-0 left-1/2 -translate-x-1/2 w-0.5 h-1/2 bg-zinc-800 origin-bottom z-0"
-                      style={{ transform: `rotate(${angle}deg)` }}
-                    />
-                    <div 
-                      className="absolute top-0 left-0 w-full h-full flex justify-center pt-6 origin-center pointer-events-none"
-                      style={{ transform: `rotate(${contentRotation}deg)` }}
+                      className={`p-3 bg-zinc-900/80 rounded-full border shadow-inner backdrop-blur-sm transition-all duration-200 cursor-pointer ${isHovered ? 'border-red-500 scale-125 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'border-zinc-800 hover:border-zinc-600'}`}
+                      onMouseEnter={() => setHoveredWheelItem(kind)}
+                      onMouseLeave={() => setHoveredWheelItem(null)}
                     >
-                      <div className="z-10 flex flex-col items-center gap-2">
-                        <div className="p-3 bg-zinc-900/80 rounded-full border border-zinc-800 shadow-inner backdrop-blur-sm text-zinc-400">
-                          {icon}
-                        </div>
+                      <div className={`transition-colors duration-200 ${isHovered ? 'text-red-400' : 'text-zinc-400'}`}>
+                        {React.cloneElement(iconConfig.icon, { className: "w-5 h-5" })}
                       </div>
                     </div>
-                  </React.Fragment>
+                  </div>
                 );
               })}
               <div className="absolute inset-[30%] rounded-full border border-zinc-800/50 pointer-events-none" />
@@ -1714,6 +2049,21 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                     <Disc className={`w-8 h-8 text-red-900/50 ${wheelState.spinning ? 'animate-spin' : ''} duration-1000`} />
                 </div>
             </div>
+          </div>
+
+          {/* Item Tooltip on Hover */}
+          <div className="h-12 flex items-center justify-center mb-4">
+            {hoveredWheelItem && ITEM_CONFIG[hoveredWheelItem] && (
+              <div className="flex items-center gap-3 px-4 py-2 bg-zinc-900/90 border border-zinc-700 rounded-lg shadow-xl animate-in fade-in zoom-in-95 duration-150">
+                <div className="text-red-400">
+                  {React.cloneElement(ITEM_CONFIG[hoveredWheelItem].icon, { className: "w-5 h-5" })}
+                </div>
+                <div>
+                  <div className="text-sm font-bold text-white">{ITEM_CONFIG[hoveredWheelItem].label}</div>
+                  <div className="text-xs text-zinc-400">{ITEM_CONFIG[hoveredWheelItem].description}</div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="h-24 flex items-center justify-center">
@@ -1935,17 +2285,27 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           </div>
 
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-1000 flex flex-col items-center">
-            <div className={`mb-2 h-4 text-[0.6rem] transition-opacity duration-300 ${activeItem ? 'opacity-100' : 'opacity-0'}`}>
-              <span className="text-red-500 font-bold uppercase mr-2 tracking-widest">{activeItem?.type}</span>
-              <span className="text-zinc-400">{activeItem?.description}</span>
+            {/* Item Tooltip - same style as wheel */}
+            <div className="h-10 flex items-center justify-center mb-2">
+              {hoveredInventoryItem && (
+                <div className="flex items-center gap-3 px-4 py-2 bg-zinc-900/90 border border-zinc-700 rounded-lg shadow-xl animate-in fade-in zoom-in-95 duration-150">
+                  <div className="text-red-400">
+                    {React.cloneElement(hoveredInventoryItem.icon, { className: "w-5 h-5" })}
+                  </div>
+                  <div>
+                    <div className="text-sm font-bold text-white">{hoveredInventoryItem.type}</div>
+                    <div className="text-xs text-zinc-400">{hoveredInventoryItem.description}</div>
+                  </div>
+                </div>
+              )}
             </div>
             
             <InventoryBar 
               items={gameState.playerInventory} 
               owner="Player" 
               max={4} 
-              onHover={setActiveItem} 
               onUse={isPlayerTurn ? handleUseItem : undefined}
+              isPlayer={true}
             />
           </div>
         </div>
