@@ -23,7 +23,8 @@ import {
   ArrowRight,
   Swords, 
   Trophy, 
-  HelpCircle
+  HelpCircle,
+  Disc
 } from 'lucide-react';
 
 // Custom Saw Icon Component
@@ -311,6 +312,18 @@ const App = () => {
   const gameEyesRef = useRef(null);
   const gameStateRef = useRef(null);
   const dealerTimerRef = useRef(null);
+  const wheelStateRef = useRef(null);
+  const spinLockRef = useRef(false); // Prevents double-spin race condition
+  const [wheelState, setWheelState] = useState({
+    active: false,
+    queue: [],
+    pool: Object.keys(ITEM_CONFIG),
+    spinning: false,
+    rotation: 0,
+    lastItem: null,
+    currentOwner: null,
+    startTurn: 'player'
+  });
   const scheduleDealerTurnDelay = () => {
     if (dealerTimerRef.current) clearTimeout(dealerTimerRef.current);
     dealerTimerRef.current = setTimeout(() => {
@@ -333,6 +346,10 @@ const App = () => {
   useEffect(() => {
     gameStateRef.current = gameState;
   }, [gameState]);
+
+  useEffect(() => {
+    wheelStateRef.current = wheelState;
+  }, [wheelState]);
 
   useEffect(() => {
     if (playerLockUntil > Date.now()) {
@@ -358,6 +375,16 @@ const App = () => {
         dealerTimerRef.current = null;
       }
       setPlayerLockUntil(0);
+      setWheelState({
+        active: false,
+        queue: [],
+        pool: Object.keys(ITEM_CONFIG),
+        spinning: false,
+        rotation: 0,
+        lastItem: null,
+        currentOwner: null
+      });
+      spinLockRef.current = false; // Reset spin lock on phase change
     }
   }, [cryptoState.phase]);
 
@@ -387,6 +414,117 @@ const App = () => {
     setTimeout(() => {
       setShell(prev => (prev && prev.id === id ? null : prev));
     }, 800);
+  };
+
+  const spinWheel = (ownerOverride = null) => {
+    // Use a ref-based lock to prevent double spins (React state update race condition)
+    if (spinLockRef.current) {
+      console.log('[SPIN] Blocked by spinLock');
+      return;
+    }
+    
+    // Read current wheel state from ref to avoid stale closures
+    const currentWheel = wheelStateRef.current;
+    if (!currentWheel || !currentWheel.active || currentWheel.spinning) {
+      console.log('[SPIN] Blocked - active:', currentWheel?.active, 'spinning:', currentWheel?.spinning);
+      return;
+    }
+    
+    const owner = ownerOverride || currentWheel.currentOwner;
+    if (!owner) {
+      console.log('[SPIN] No owner');
+      return;
+    }
+    
+    // Verify the owner matches the expected next in queue
+    if (currentWheel.queue.length > 0 && currentWheel.queue[0] !== owner) {
+      console.log('[SPIN] Owner mismatch! Expected:', currentWheel.queue[0], 'Got:', owner);
+      return;
+    }
+    
+    const pool = currentWheel.pool.length ? currentWheel.pool : Object.keys(ITEM_CONFIG);
+    if (!pool.length) return;
+    
+    // Acquire spin lock
+    spinLockRef.current = true;
+    console.log('[SPIN] Starting spin for:', owner, 'queue:', currentWheel.queue);
+    
+    // Calculate spin parameters
+    const segmentAngle = 360 / pool.length;
+    const contentOffset = segmentAngle / 2;
+    const idx = Math.floor(random() * pool.length);
+    const selectedKind = pool[idx];
+    const itemAngle = (idx * segmentAngle) + contentOffset;
+    const targetRotation = 360 - itemAngle;
+    const noise = (random() - 0.5) * (segmentAngle * 0.4);
+    const extraSpins = 5 * 360;
+    const base = Math.ceil(currentWheel.rotation / 360) * 360;
+    const rotation = base + extraSpins + targetRotation + noise;
+    const startTurnForRound = currentWheel.startTurn || 'player';
+    
+    // Start the spin immediately
+    setWheelState(prev => ({
+      ...prev,
+      spinning: true,
+      lastItem: null,
+      rotation,
+      currentOwner: owner
+    }));
+    
+    // After animation finishes (4 seconds), process the result
+    setTimeout(() => {
+      // Grant the item to the current owner
+      console.log('[SPIN] Granting', selectedKind, 'to', owner);
+      grantItemTo(owner, selectedKind);
+      
+      // Read latest wheel state to get current queue
+      const latestWheel = wheelStateRef.current;
+      if (!latestWheel) {
+        spinLockRef.current = false;
+        return;
+      }
+      
+      // Advance the queue - remove the first entry (current spinner)
+      const newQueue = latestWheel.queue.slice(1);
+      const nextOwner = newQueue.length > 0 ? newQueue[0] : null;
+      const willContinue = newQueue.length > 0;
+      
+        console.log('[SPIN] Complete. newQueue:', newQueue, 'nextOwner:', nextOwner, 'willContinue:', willContinue);
+        
+        // Keep pool unchanged for visual consistency - don't remove items during wheel session
+        // This prevents the wheel from re-rendering with fewer/differently-positioned segments
+        
+        // Update state to show the acquired item
+        setWheelState(prev => ({
+          ...prev,
+          spinning: false,
+          lastItem: selectedKind,
+          // Pool stays the same for visual consistency
+          queue: newQueue,
+          currentOwner: nextOwner,
+          active: willContinue
+        }));
+      
+      // After showing the item briefly (1.5s), either continue to next spin or start round
+      setTimeout(() => {
+        // Release spin lock
+        spinLockRef.current = false;
+        
+        setWheelState(prev => ({
+          ...prev,
+          lastItem: null
+        }));
+        
+        // Check if we should continue spinning or start the next round
+        // The useEffect will handle triggering the dealer spin if needed
+        if (!willContinue) {
+          console.log('[SPIN] All spins done, starting next round');
+          setGameState(prevGame => startRoundFromState(prevGame, [], startTurnForRound));
+        } else {
+          console.log('[SPIN] More spins to go, nextOwner:', nextOwner);
+        }
+      }, 1500);
+    }, 4000);
   };
 
   const resolveSkips = (statusEffects, desiredNext) => {
@@ -439,8 +577,6 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
     const itemsToGive = state.itemsPerRound ?? 0;
     const nextItemsPerRound = Math.min(1, itemsToGive + 1);
 
-    const playerInventory = addItemsToInventory(state.playerInventory, 'player', telemetry, itemsToGive);
-    const dealerInventory = addItemsToInventory(state.dealerInventory, 'dealer', telemetry, itemsToGive);
     const { updatedStatus, nextTurn, telemetry: skipMessages } = resolveSkips(state.statusEffects, startTurn);
 
     return {
@@ -451,8 +587,8 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       blankShells: blankCount,
       currentShellIndex: 0,
       knowledge: freshKnowledge(),
-      playerInventory,
-      dealerInventory,
+      playerInventory: state.playerInventory,
+      dealerInventory: state.dealerInventory,
       statusEffects: updatedStatus,
       currentTurn: nextTurn,
       log: pushTelemetry(state.log, [...telemetry, ...skipMessages]),
@@ -533,7 +669,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       if (cryptoState.phase !== 'playing' || prev.matchOver) return prev;
       if (prev.currentTurn !== shooter) return prev;
 
-      if (!prev.chamber.length || prev.currentShellIndex >= prev.chamber.length) {
+    if (!prev.chamber.length || prev.currentShellIndex >= prev.chamber.length) {
         return handleRoundExhausted(prev);
       }
 
@@ -589,11 +725,40 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       nextState = concludeMatchIfNeeded(nextState, telemetry);
 
       if (!nextState.matchOver && currentShellIndex >= prev.chamber.length) {
+        // Use the same turn resolution logic as normal shots (includes skip handling)
         const desiredNext = shooter === 'player' ? 'dealer' : 'player';
+        const { updatedStatus, nextTurn, telemetry: skipTelemetry } = resolveSkips(nextState.statusEffects, desiredNext);
+        
+        // Determine who spins first based on the resolved next turn
+        const firstSpinner = nextTurn; // Person who gets the next turn spins first
+        const secondSpinner = firstSpinner === 'player' ? 'dealer' : 'player'; // Other person spins second
+        
+        // Reset status effects for the new round (skips are consumed/reset)
         nextState.statusEffects = freshStatus();
-        nextState.currentTurn = desiredNext;
-        nextState.log = pushTelemetry(prev.log, [...telemetry, `R${prev.round} END: Reloading...`]);
-        nextState = startRoundFromState(nextState, [], desiredNext);
+        nextState.currentTurn = nextTurn;
+        nextState.log = pushTelemetry(prev.log, [...telemetry, ...skipTelemetry, `R${prev.round} END: Reloading...`]);
+        
+        // Prepare wheel spins before starting next round
+        // Ensure exactly 1 item per actor (player and dealer each get 1 item)
+        const spinsPerActor = Math.min(1, nextState.itemsPerRound ?? 0); // Cap at 1 to ensure only 1 item per actor
+        if (spinsPerActor > 0) {
+          // Build queue with exactly 1 spin for each actor
+          const queue = [firstSpinner, secondSpinner]; // Exactly 2 entries = 1 per actor
+          console.log('[WHEEL] Queue built:', queue, 'spinsPerActor:', spinsPerActor, 'shooter:', shooter, 'nextTurn:', nextTurn, 'isLive:', isLive);
+          setWheelState({
+            active: true,
+            queue,
+            pool: Object.keys(ITEM_CONFIG),
+            spinning: false,
+            rotation: 0,
+            lastItem: null,
+            currentOwner: queue[0] || null,
+            startTurn: nextTurn
+          });
+          spinLockRef.current = false; // Ensure lock is clear when wheel opens
+          return nextState; // wheel will continue flow
+        }
+        nextState = startRoundFromState(nextState, [], nextTurn);
       } else {
         const desiredNext = shooter === 'player' ? 'dealer' : 'player';
         const { updatedStatus, nextTurn, telemetry: skipTelemetry } = resolveSkips(nextState.statusEffects, desiredNext);
@@ -618,6 +783,31 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
   };
 
   const removeItemFromInventory = (inventory, id) => inventory.filter(it => it.id !== id);
+
+  const grantItemTo = (owner, kind) => {
+    console.log('[GRANT] Granting', kind, 'to', owner);
+    setGameState(prev => {
+      const telemetry = [];
+      const inventoryKey = owner === 'player' ? 'playerInventory' : 'dealerInventory';
+      const item = buildItem(kind, random);
+      if (!item) return prev;
+      const prevCount = prev[inventoryKey].length;
+      let nextInventory = [...prev[inventoryKey], item];
+      let discarded = 0;
+      while (nextInventory.length > MAX_INVENTORY) {
+        nextInventory.shift();
+        discarded += 1;
+      }
+      if (discarded) telemetry.push(`${ACTOR_LABEL[owner]} inventory full → discarded ${discarded}`);
+      const trimmed = nextInventory;
+      console.log('[GRANT] Done:', owner, 'inventory:', prevCount, '->', trimmed.length);
+      return {
+        ...prev,
+        [inventoryKey]: trimmed,
+        log: pushTelemetry(prev.log, [`${ACTOR_LABEL[owner]} wheel: ${ITEM_CONFIG[kind].label}`])
+      };
+    });
+  };
 
   const handleItemUse = (actor, item) => {
     const opponent = actor === 'player' ? 'dealer' : 'player';
@@ -780,18 +970,20 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
   };
 
   const isSawAnimating = effectOverlay === 'sawing';
-  const isPlayerTurn = cryptoState.phase === 'playing' && gameState.currentTurn === 'player' && !gameState.matchOver && !(playerLockUntil > Date.now()) && !isSawAnimating;
+  const isPlayerTurn = cryptoState.phase === 'playing' && gameState.currentTurn === 'player' && !gameState.matchOver && !(playerLockUntil > Date.now()) && !isSawAnimating && !wheelState.active;
   const isReloading = gameState.chamber.length > 0 && gameState.currentShellIndex >= gameState.chamber.length && !gameState.matchOver;
   const turnLabel = cryptoState.phase === 'playing'
     ? (gameState.currentTurn === 'player' ? 'Your Turn' : 'Dealer Turn')
     : null;
   const pendingPlayerSkips = gameState.statusEffects?.player?.skipTurnsRemaining || 0;
   const pendingDealerSkips = gameState.statusEffects?.dealer?.skipTurnsRemaining || 0;
+  const remainingSpins = wheelState.queue.length;
 
   const dealerTakeTurn = () => {
     const latest = gameStateRef.current || gameState;
     if (cryptoState.phase !== 'playing' || latest.matchOver) return;
     if (latest.currentTurn !== 'dealer') return;
+    if (wheelState.active) return;
 
     const remaining = latest.chamber.length - latest.currentShellIndex;
     if (remaining <= 0) {
@@ -916,6 +1108,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
   useEffect(() => {
     if (cryptoState.phase !== 'playing') return;
     if (gameState.matchOver) return;
+    if (wheelState.active) return;
     if (gameState.currentTurn !== 'dealer') return;
 
     if (gameState.statusEffects.dealer.skipTurnsRemaining > 0) {
@@ -955,6 +1148,16 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
     gameState.currentShellIndex,
     cryptoState.phase
   ]);
+
+  useEffect(() => {
+    if (!wheelState.active) return;
+    if (wheelState.spinning) return;
+    if (wheelState.currentOwner === 'dealer' && !wheelState.lastItem) {
+      console.log('[WHEEL EFFECT] Scheduling dealer spin in 800ms');
+      const t = setTimeout(() => spinWheel('dealer'), 800);
+      return () => clearTimeout(t);
+    }
+  }, [wheelState.active, wheelState.spinning, wheelState.currentOwner, wheelState.lastItem]);
 
   // Helper to determine gun transform class
   const getGunContainerClass = () => {
@@ -1449,6 +1652,103 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               )}
             </div>
           )}
+      {wheelState.active && (
+        <div className="fixed inset-0 z-[250] bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center pointer-events-auto font-mono">
+            <div className="text-center mb-8 animate-in slide-in-from-top-4">
+            <h2 className="text-2xl font-black text-white tracking-[0.3em] uppercase mb-2 text-shadow-aberration">
+              {wheelState.currentOwner === 'player' ? "PLAYER DISTRIBUTION" : "DEALER DISTRIBUTION"}
+            </h2>
+            <p className="text-zinc-500 text-xs font-mono uppercase tracking-widest">
+              {wheelState.currentOwner === 'player' ? "Initiate Spin Sequence" : "Automated Dispenser Active"}
+            </p>
+            <div className="mt-2 text-red-500 font-bold text-xs uppercase tracking-widest animate-pulse">
+              {remainingSpins} Spins Remaining
+            </div>
+          </div>
+
+          <div className="relative w-96 h-96 mb-12">
+            <div className="absolute -top-8 left-1/2 -translate-x-1/2 z-30 filter drop-shadow-[0_4px_4px_rgba(0,0,0,0.8)]">
+                <svg width="40" height="60" viewBox="0 0 40 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M20 60L5 20H35L20 60Z" fill="#ef4444" stroke="#7f1d1d" strokeWidth="2" />
+                    <rect x="10" y="0" width="20" height="25" fill="#18181b" stroke="#27272a" strokeWidth="2" />
+                    <circle cx="20" cy="12" r="4" fill="#52525b" />
+                </svg>
+            </div>
+            <div
+              className="w-full h-full rounded-full border-[8px] border-zinc-800 bg-zinc-950 relative overflow-hidden shadow-[inset_0_0_40px_rgba(0,0,0,0.8)] transition-transform"
+              style={{
+                transform: `rotate(${wheelState.rotation}deg)`,
+                transitionDuration: wheelState.spinning ? '4s' : '0s',
+                transitionTimingFunction: 'cubic-bezier(0.15, 0.85, 0.35, 1)'
+              }}
+            >
+              {wheelState.pool.map((kind, idx) => {
+                const segmentAngle = 360 / (wheelState.pool.length || 1);
+                const angle = segmentAngle * idx;
+                const contentRotation = angle + segmentAngle / 2;
+                const icon = ITEM_CONFIG[kind].icon;
+                return (
+                  <React.Fragment key={kind}>
+                    <div 
+                      className="absolute top-0 left-1/2 -translate-x-1/2 w-0.5 h-1/2 bg-zinc-800 origin-bottom z-0"
+                      style={{ transform: `rotate(${angle}deg)` }}
+                    />
+                    <div 
+                      className="absolute top-0 left-0 w-full h-full flex justify-center pt-6 origin-center pointer-events-none"
+                      style={{ transform: `rotate(${contentRotation}deg)` }}
+                    >
+                      <div className="z-10 flex flex-col items-center gap-2">
+                        <div className="p-3 bg-zinc-900/80 rounded-full border border-zinc-800 shadow-inner backdrop-blur-sm text-zinc-400">
+                          {icon}
+                        </div>
+                      </div>
+                    </div>
+                  </React.Fragment>
+                );
+              })}
+              <div className="absolute inset-[30%] rounded-full border border-zinc-800/50 pointer-events-none" />
+              <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 mix-blend-overlay pointer-events-none" />
+            </div>
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 bg-zinc-900 border-4 border-zinc-800 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(0,0,0,0.8)] z-20">
+                <div className="w-16 h-16 rounded-full border border-zinc-700 bg-[conic-gradient(var(--tw-gradient-stops))] from-zinc-800 via-zinc-900 to-zinc-800 flex items-center justify-center">
+                    <Disc className={`w-8 h-8 text-red-900/50 ${wheelState.spinning ? 'animate-spin' : ''} duration-1000`} />
+                </div>
+            </div>
+          </div>
+
+          <div className="h-24 flex items-center justify-center">
+            {wheelState.lastItem ? (
+                <div className="flex items-center gap-6 animate-in zoom-in slide-in-from-bottom-2 duration-300">
+                    <div className="p-4 bg-zinc-900 border border-red-500 rounded-lg text-red-500 shadow-[0_0_20px_rgba(220,38,38,0.3)]">
+                        {React.cloneElement(ITEM_CONFIG[wheelState.lastItem]?.icon || <Disc />, { className: "w-8 h-8" })}
+                    </div>
+                    <div className="text-left">
+                        <div className="text-xs text-zinc-500 uppercase tracking-widest font-bold">Acquired Asset</div>
+                        <div className="text-2xl font-black text-white uppercase tracking-tighter text-shadow-aberration">{ITEM_CONFIG[wheelState.lastItem]?.label || 'Item'}</div>
+                    </div>
+                </div>
+            ) : (
+                wheelState.currentOwner === 'player' && !wheelState.spinning && (
+                    <button 
+                        onClick={() => spinWheel('player')}
+                        className="group relative px-12 py-5 bg-zinc-900 border border-zinc-700 text-zinc-300 text-sm font-black uppercase tracking-[0.25em] hover:border-red-500 hover:text-red-400 transition-all active:scale-95 hover:shadow-[0_0_20px_rgba(220,38,38,0.3)]"
+                    >
+                        <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-zinc-900 px-2 text-[0.5rem] text-zinc-500 border border-zinc-800 uppercase tracking-widest">
+                            INPUT_SPIN
+                        </div>
+                        SPIN WHEEL
+                    </button>
+                )
+            )}
+            
+            {wheelState.currentOwner === 'dealer' && !wheelState.lastItem && (
+                <div className="text-red-900 font-black text-sm tracking-[0.5em] animate-pulse">
+                    DEALER TURN...
+                </div>
+            )}
+          </div>
+        </div>
+      )}
           {isReloading && (
             <div className="absolute -top-6 left-1/2 -translate-x-1/2 px-3 py-1 bg-red-900/30 border border-red-500/50 text-red-300 text-[0.65rem] font-bold uppercase tracking-[0.2em] rounded shadow-[0_0_12px_rgba(220,38,38,0.4)]">
               Reloading...
