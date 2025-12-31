@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { ethers } from 'ethers';
 import { 
   Skull, 
   User,
@@ -319,14 +320,37 @@ const DealerEyes = () => {
   );
 };
 
+// Monad Testnet Configuration
+const MONAD_TESTNET = {
+  chainId: '0x279F', // 10143 in hex
+  chainName: 'Monad Testnet',
+  nativeCurrency: {
+    name: 'MON',
+    symbol: 'MON',
+    decimals: 18,
+  },
+  rpcUrls: ['https://testnet-rpc.monad.xyz/'],
+  blockExplorerUrls: ['https://testnet.monadvision.com'],
+};
+
+const MONAD_CHAIN_ID = 10143;
+
 const App = () => {
+  // --- WALLET CONNECTION STATE ---
+  const [isWalletConnected, setIsWalletConnected] = useState(false);
+  const [showWalletModal, setShowWalletModal] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [connectionError, setConnectionError] = useState(null);
+  const providerRef = useRef(null);
+  const signerRef = useRef(null);
+
   // --- CRYPTO / BETTING STATE ---
   const [cryptoState, setCryptoState] = useState({
-    balance: 1000.0,
+    balance: 0.0,
     currentWager: 0,
     multiplier: 1.0,
     phase: 'main_menu',
-    walletAddress: '0x0000000000000000000000000000000000000000' // Mock address, replace with actual wallet connection
+    walletAddress: '0x0000000000000000000000000000000000000000'
   });
 
   // --- AUDIO STATE ---
@@ -361,6 +385,206 @@ const App = () => {
   });
 
   const [gameState, setGameState] = useState(() => createInitialGameState());
+
+  // --- WALLET CONNECTION FUNCTIONS ---
+  const checkWalletConnection = async () => {
+    if (typeof window.ethereum === 'undefined') {
+      return false;
+    }
+
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const accounts = await provider.listAccounts();
+      
+      if (accounts.length > 0) {
+        const network = await provider.getNetwork();
+        const chainId = Number(network.chainId);
+        
+        if (chainId === MONAD_CHAIN_ID) {
+          providerRef.current = provider;
+          signerRef.current = await provider.getSigner();
+          const address = await signerRef.current.getAddress();
+          const balance = await provider.getBalance(address);
+          
+          setCryptoState(prev => ({
+            ...prev,
+            walletAddress: address,
+            balance: parseFloat(ethers.formatEther(balance))
+          }));
+          setIsWalletConnected(true);
+          return true;
+        } else {
+          // Wrong network
+          return false;
+        }
+      }
+      return false;
+    } catch (error) {
+      console.error('Error checking wallet connection:', error);
+      return false;
+    }
+  };
+
+  const switchToMonadTestnet = async () => {
+    if (typeof window.ethereum === 'undefined') {
+      setConnectionError('Please install MetaMask or another Web3 wallet');
+      return false;
+    }
+
+    try {
+      // Try to switch to Monad testnet
+      await window.ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: MONAD_TESTNET.chainId }],
+      });
+      return true;
+    } catch (switchError) {
+      // This error code indicates that the chain has not been added to MetaMask
+      if (switchError.code === 4902) {
+        try {
+          // Add the chain
+          await window.ethereum.request({
+            method: 'wallet_addEthereumChain',
+            params: [MONAD_TESTNET],
+          });
+          return true;
+        } catch (addError) {
+          console.error('Error adding Monad testnet:', addError);
+          setConnectionError('Failed to add Monad testnet to wallet');
+          return false;
+        }
+      } else {
+        console.error('Error switching to Monad testnet:', switchError);
+        setConnectionError('Failed to switch to Monad testnet');
+        return false;
+      }
+    }
+  };
+
+  const connectWallet = async () => {
+    if (typeof window.ethereum === 'undefined') {
+      setConnectionError('Please install MetaMask or another Web3 wallet');
+      return;
+    }
+
+    setIsConnecting(true);
+    setConnectionError(null);
+
+    try {
+      // First, switch to Monad testnet
+      const switched = await switchToMonadTestnet();
+      if (!switched) {
+        setIsConnecting(false);
+        return;
+      }
+
+      // Request account access
+      await window.ethereum.request({ method: 'eth_requestAccounts' });
+
+      // Get provider and signer
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      providerRef.current = provider;
+      signerRef.current = await provider.getSigner();
+
+      // Get address and balance
+      const address = await signerRef.current.getAddress();
+      const balance = await provider.getBalance(address);
+
+      // Update state
+      setCryptoState(prev => ({
+        ...prev,
+        walletAddress: address,
+        balance: parseFloat(ethers.formatEther(balance))
+      }));
+      setIsWalletConnected(true);
+      setShowWalletModal(false);
+
+      // Listen for account changes
+      window.ethereum.on('accountsChanged', handleAccountsChanged);
+      window.ethereum.on('chainChanged', handleChainChanged);
+    } catch (error) {
+      console.error('Error connecting wallet:', error);
+      if (error.code === 4001) {
+        setConnectionError('Connection rejected by user');
+      } else {
+        setConnectionError('Failed to connect wallet. Please try again.');
+      }
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const handleAccountsChanged = async (accounts) => {
+    if (accounts.length === 0) {
+      // User disconnected
+      setIsWalletConnected(false);
+      setCryptoState(prev => ({
+        ...prev,
+        walletAddress: '0x0000000000000000000000000000000000000000',
+        balance: 0
+      }));
+      setShowWalletModal(true);
+    } else {
+      // Account changed, reconnect
+      await checkWalletConnection();
+    }
+  };
+
+  const handleChainChanged = async (chainId) => {
+    const chainIdNum = parseInt(chainId, 16);
+    if (chainIdNum !== MONAD_CHAIN_ID) {
+      setIsWalletConnected(false);
+      setShowWalletModal(true);
+      setConnectionError('Please switch to Monad Testnet');
+    } else {
+      await checkWalletConnection();
+    }
+  };
+
+  // Check wallet connection on mount
+  useEffect(() => {
+    const init = async () => {
+      const connected = await checkWalletConnection();
+      if (!connected) {
+        setShowWalletModal(true);
+      } else {
+        setShowWalletModal(false);
+        // Set up listeners
+        if (window.ethereum) {
+          window.ethereum.on('accountsChanged', handleAccountsChanged);
+          window.ethereum.on('chainChanged', handleChainChanged);
+        }
+      }
+    };
+    init();
+
+    return () => {
+      if (window.ethereum) {
+        window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+        window.ethereum.removeListener('chainChanged', handleChainChanged);
+      }
+    };
+  }, []);
+
+  // Update balance periodically
+  useEffect(() => {
+    if (!isWalletConnected || !providerRef.current) return;
+
+    const updateBalance = async () => {
+      try {
+        const balance = await providerRef.current.getBalance(cryptoState.walletAddress);
+        setCryptoState(prev => ({
+          ...prev,
+          balance: parseFloat(ethers.formatEther(balance))
+        }));
+      } catch (error) {
+        console.error('Error updating balance:', error);
+      }
+    };
+
+    const interval = setInterval(updateBalance, 10000); // Update every 10 seconds
+    return () => clearInterval(interval);
+  }, [isWalletConnected, cryptoState.walletAddress]);
 
   const [hoveredInventoryItem, setHoveredInventoryItem] = useState(null); // For inventory item tooltips
   const hoverTimeoutRef = useRef(null);
@@ -1606,7 +1830,13 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
           <div className="z-10 w-full max-w-sm flex flex-col gap-4 animate-in slide-in-from-bottom-12 duration-1000 delay-200">
              <MenuButton 
-               onClick={() => setCryptoState(p => ({...p, phase: 'betting'}))} 
+               onClick={() => {
+                 if (!isWalletConnected) {
+                   setShowWalletModal(true);
+                 } else {
+                   setCryptoState(p => ({...p, phase: 'betting'}));
+                 }
+               }} 
                icon={<Skull className="w-5 h-5"/>} 
                label="Play" 
                primary 
@@ -1669,7 +1899,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                   
                   <div className="text-center mb-8">
                       <h1 className="text-2xl font-black tracking-[0.2em] text-red-500 mb-2 text-shadow-aberration">ESTABLISH LINK</h1>
-                      <div className="text-xs text-zinc-500 uppercase tracking-widest">Connect Wallet & Initialize Contract</div>
+                      <div className="text-xs text-zinc-500 uppercase tracking-widest">Initialize Contract</div>
                   </div>
 
                   <div className="mb-8 p-4 bg-zinc-950 border border-zinc-800 rounded">
@@ -2518,6 +2748,96 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         .text-shadow-glow { text-shadow: 0 0 8px rgba(185,28,28,0.4); }
         .text-shadow-aberration { text-shadow: 1px 0 0 rgba(255,0,0,0.5), -1px 0 0 rgba(0,0,255,0.3); }
       `}</style>
+
+      {/* WALLET CONNECTION MODAL */}
+      {showWalletModal && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/95 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="relative max-w-md w-full mx-4 bg-zinc-900 border border-red-500/50 rounded-lg shadow-[0_0_60px_rgba(220,38,38,0.5)]">
+            {/* Header */}
+            <div className="sticky top-0 bg-zinc-900 border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Wallet className="w-6 h-6 text-red-500" />
+                <h2 className="text-xl font-black tracking-[0.15em] uppercase text-white">Connect Wallet</h2>
+              </div>
+              {isWalletConnected && (
+                <button 
+                  onClick={() => setShowWalletModal(false)}
+                  className="p-2 hover:bg-zinc-800 rounded-lg transition-colors text-zinc-400 hover:text-white"
+                  aria-label="Close"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+
+            {/* Content */}
+            <div className="px-6 py-6 space-y-6">
+              <div className="text-center">
+                <p className="text-zinc-300 text-sm mb-4">
+                  Connect your wallet to play Shotgun Roulette on Monad Testnet
+                </p>
+                <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-lg mb-4">
+                  <div className="text-xs text-zinc-500 uppercase tracking-wider mb-2">Network</div>
+                  <div className="text-lg font-bold text-red-500">Monad Testnet</div>
+                  <div className="text-xs text-zinc-600 mt-1">Chain ID: {MONAD_CHAIN_ID}</div>
+                </div>
+              </div>
+
+              {connectionError && (
+                <div className="p-4 bg-red-900/20 border border-red-500/50 rounded-lg">
+                  <p className="text-red-400 text-sm">{connectionError}</p>
+                </div>
+              )}
+
+              {!isWalletConnected && (
+                <button
+                  onClick={connectWallet}
+                  disabled={isConnecting}
+                  className="w-full py-4 bg-red-600 hover:bg-red-500 disabled:bg-red-900 disabled:opacity-50 text-white font-bold uppercase tracking-widest text-sm transition-all rounded flex items-center justify-center gap-2"
+                >
+                  {isConnecting ? (
+                    <>
+                      <RefreshCw className="w-5 h-5 animate-spin" />
+                      Connecting...
+                    </>
+                  ) : (
+                    <>
+                      <Wallet className="w-5 h-5" />
+                      Connect Wallet
+                    </>
+                  )}
+                </button>
+              )}
+
+              {isWalletConnected && (
+                <div className="space-y-4">
+                  <div className="p-4 bg-green-900/20 border border-green-500/50 rounded-lg">
+                    <div className="text-xs text-green-500 uppercase tracking-wider mb-2">Connected</div>
+                    <div className="font-mono text-sm text-green-400 break-all">
+                      {cryptoState.walletAddress}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowWalletModal(false)}
+                    className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-bold uppercase tracking-widest text-sm transition-all rounded"
+                  >
+                    Continue
+                  </button>
+                </div>
+              )}
+
+              {typeof window.ethereum === 'undefined' && (
+                <div className="p-4 bg-yellow-900/20 border border-yellow-500/50 rounded-lg">
+                  <p className="text-yellow-400 text-sm mb-2">No Web3 wallet detected</p>
+                  <p className="text-yellow-300 text-xs">
+                    Please install <a href="https://metamask.io" target="_blank" rel="noopener noreferrer" className="underline">MetaMask</a> or another Web3 wallet to continue.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* PROFILE MODAL */}
       {showProfile && (
