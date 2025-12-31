@@ -14,7 +14,7 @@ export const SHOTGUN_ROULETTE_ABI = [
 
 // Contract address - UPDATE THIS AFTER DEPLOYMENT
 // For now, this is a placeholder. You'll need to deploy the contract and update this address
-export const CONTRACT_ADDRESS = "0x7828D6a6C2B05AAa85D9Ae50F50D96e1681944c1";
+export const CONTRACT_ADDRESS = "0x6F60c0dD305C27D8f4B853fB31db776663C0f107";
 
 // Contract configuration
 export const CONTRACT_CONFIG = {

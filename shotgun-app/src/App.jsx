@@ -958,15 +958,8 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
     setTelemetry("Initializing contract...");
 
     try {
-      // Check if player already has an active game
-      const hasActive = await contractRef.current.hasActiveGame(cryptoState.walletAddress);
-      if (hasActive) {
-        setTelemetry("Game already in progress. Please finish current game first.");
-        setIsContractLoading(false);
-        return;
-      }
-
       // Call contract to start game (pays 1 MON)
+      // Note: startGame() will automatically clear any previous active game
       const playFee = ethers.parseEther("1.0");
       const tx = await contractRef.current.startGame({ value: playFee });
       setTelemetry("Transaction sent. Waiting for confirmation...");
@@ -1092,24 +1085,11 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         rewardClaimedRef.current = true;
         
         // Delay before showing loss screen
-        setTimeout(async () => {
+        setTimeout(() => {
           setAimingAt(null);
           setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
-          
-          // End game in contract (no reward)
-          if (contractRef.current) {
-            try {
-              setIsContractLoading(true);
-              const tx = await contractRef.current.endGame();
-              await tx.wait();
-              setTelemetry("Game ended.");
-            } catch (error) {
-              console.error('Error ending game:', error);
-              // Non-critical error, just log it
-            } finally {
-              setIsContractLoading(false);
-            }
-          }
+          // No need to call endGame() - contract will auto-clear on next startGame()
+          setTelemetry("Game ended. You can start a new game when ready.");
         }, 1000);
       }
     }

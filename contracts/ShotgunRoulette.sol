@@ -29,11 +29,17 @@ contract ShotgunRoulette {
     
     /**
      * @dev Start a new game by paying the play fee
+     * Automatically clears any previous active game for the player
      */
     function startGame() external payable {
         require(msg.value == PLAY_FEE, "Must pay exactly 1 MON to play");
-        require(!activeGames[msg.sender], "Game already in progress");
         require(address(this).balance >= WIN_REWARD, "Contract insufficient funds");
+        
+        // Automatically clear previous game if one exists (no need for endGame() call)
+        if (activeGames[msg.sender]) {
+            activeGames[msg.sender] = false;
+            emit GameLost(msg.sender);
+        }
         
         activeGames[msg.sender] = true;
         gameStartTime[msg.sender] = block.timestamp;
