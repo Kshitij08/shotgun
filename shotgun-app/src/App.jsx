@@ -1628,124 +1628,162 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
     const current = gameStateRef.current || latest;
     const knownShell = current.knowledge.dealer.currentShellKnown ? current.knowledge.dealer.knownCurrentShellType : null;
     const pLive = remaining > 0 ? current.liveShells / remaining : 0;
+    const hpAdvantage = current.dealerHealth - current.playerHealth;
+    const canKillPlayer = current.playerHealth <= 2;
+    const isDealerLow = current.dealerHealth <= 2;
+    const isDealerCritical = current.dealerHealth <= 1;
 
-    // Survival first: heal if critical (Cigarettes or Random Pill as backup)
-    if (current.dealerHealth <= 1) {
+    // ===== CRITICAL SURVIVAL PRIORITIES =====
+    // If dealer is at 1 HP, prioritize survival above all else
+    if (isDealerCritical) {
+      // Heal if possible
       if (useItem('CIGARETTES')) {
         scheduleDealerTurnDelay();
         return;
       }
-      // Use Shield for emergency protection
-      if (hasItem('SHIELD') && pLive >= 0.5 && useItem('SHIELD')) {
+      // If we know it's live and can't heal, try to invert it to blank and shoot self
+      if (knownShell === 'LIVE' && hasItem('INVERTER') && useItem('INVERTER')) {
+        scheduleDealerTurnDelay();
+        return;
+      }
+      // If unknown but high live odds, use Beer to eject dangerous shell
+      if (!knownShell && pLive > 0.6 && useItem('BEER')) {
+        scheduleDealerTurnDelay();
+        return;
+      }
+      // If known live and no escape, use Shield as last resort
+      if (knownShell === 'LIVE' && hasItem('SHIELD') && useItem('SHIELD')) {
+        scheduleDealerTurnDelay();
+        return;
+      }
+      // If unknown and high live odds, use Shield
+      if (!knownShell && pLive >= 0.5 && hasItem('SHIELD') && useItem('SHIELD')) {
         scheduleDealerTurnDelay();
         return;
       }
     }
 
-    // Random Pill: use when low HP (risky but worth it)
-    if (current.dealerHealth <= 2 && hasItem('RANDOM_PILL') && random() < 0.4 && useItem('RANDOM_PILL')) {
-      scheduleDealerTurnDelay();
-      return;
-    }
-
-    // Steal from player if they have useful items and we're not full
-    if (current.playerInventory.length > 0 && current.dealerInventory.length < MAX_INVENTORY && random() < 0.3 && useItem('STEAL')) {
-      scheduleDealerTurnDelay();
-      return;
-    }
-
-    // Shake Down: destroy player item if they have items
-    if (current.playerInventory.length >= 2 && random() < 0.25 && useItem('SHAKE_DOWN')) {
-      scheduleDealerTurnDelay();
-      return;
-    }
-
-    // If shell unknown and mid uncertainty, reveal first
-    if (!knownShell && remaining > 0 && pLive > 0.35 && pLive < 0.65 && useItem('MAGNIFYING_GLASS')) {
-      scheduleDealerTurnDelay();
-      return;
-    }
-
-    // Known blank: use Inverter to make it live, or shoot self for skip
+    // ===== KNOWN SHELL LOGIC =====
+    // Known blank: ALWAYS shoot self to get skip (blanks don't damage player)
     if (knownShell === 'BLANK') {
-      // Use Inverter if player is low HP - turn blank into live and shoot them
-      if (current.playerHealth <= 2 && hasItem('INVERTER') && useItem('INVERTER')) {
+      // Exception: If player is at 1 HP and we have Inverter, turn blank into live for kill
+      if (current.playerHealth === 1 && hasItem('INVERTER') && useItem('INVERTER')) {
         scheduleDealerTurnDelay();
         return;
       }
-      // Otherwise exploit blank for skip advantage
-      const selfBias = 0.75;
-      if (random() < selfBias) {
-        aimAndShoot('dealer');
-      } else {
-        aimAndShoot('player');
-      }
+      // Always shoot self with blank to get skip turn advantage
+      aimAndShoot('dealer');
       return;
     }
 
-    // Known live: go offensive, prime saw if it secures advantage
+    // Known live: offensive play
     if (knownShell === 'LIVE') {
-      // Use Inverter to make it blank and shoot self for skip if dealer is low HP
-      if (current.dealerHealth <= 1 && hasItem('INVERTER') && useItem('INVERTER')) {
+      // If dealer is low HP, try to invert to blank and shoot self for skip
+      if (isDealerCritical && hasItem('INVERTER') && useItem('INVERTER')) {
         scheduleDealerTurnDelay();
         return;
       }
-      if (current.playerHealth <= 2 && useItem('HAND_SAW')) {
+      // If we can kill player (2 HP or less), use Hand Saw for double damage
+      if (canKillPlayer && hasItem('HAND_SAW') && useItem('HAND_SAW')) {
         scheduleDealerTurnDelay();
         return;
       }
-      // Use Shield before shooting if player might retaliate
-      if (current.playerHealth >= current.dealerHealth && hasItem('SHIELD') && random() < 0.3 && useItem('SHIELD')) {
+      // If player has HP advantage and might retaliate, use Shield
+      if (hpAdvantage < 0 && hasItem('SHIELD') && useItem('SHIELD')) {
         scheduleDealerTurnDelay();
         return;
       }
+      // Shoot player with live shell
       aimAndShoot('player');
       return;
     }
 
-    // Unknown shell paths
-    // Use Skip when odds favor aggression and stalling helps
-    if (pLive >= 0.6 && current.playerHealth >= current.dealerHealth && useItem('SKIP')) {
-      scheduleDealerTurnDelay();
-      return;
-    }
-
-    // Prime saw if high live odds and player low HP
-    if (pLive >= 0.7 && current.playerHealth <= 2 && hasItem('HAND_SAW')) {
-      if (useItem('HAND_SAW')) {
+    // ===== UNKNOWN SHELL LOGIC =====
+    // Use Magnifying Glass when uncertainty is high and decision matters
+    if (!knownShell && remaining > 0) {
+      // Use glass if dealer is low and needs to know if safe to shoot self
+      if (isDealerLow && pLive > 0.4 && pLive < 0.7 && useItem('MAGNIFYING_GLASS')) {
+        scheduleDealerTurnDelay();
+        return;
+      }
+      // Use glass in mid-uncertainty range for better decision making
+      if (pLive > 0.35 && pLive < 0.65 && useItem('MAGNIFYING_GLASS')) {
         scheduleDealerTurnDelay();
         return;
       }
     }
 
-    // Beer away dangerous live when dealer is low
-    if (pLive > 0.7 && current.dealerHealth <= 1 && useItem('BEER')) {
+    // ===== ITEM USAGE PRIORITIES =====
+    // Hand Saw: Use when we can secure a kill or significant advantage
+    if (!knownShell && pLive >= 0.65 && canKillPlayer && hasItem('HAND_SAW') && useItem('HAND_SAW')) {
       scheduleDealerTurnDelay();
       return;
     }
 
-    // High live odds: shoot player
+    // Beer: Eject dangerous live shells when dealer is low
+    if (!knownShell && pLive > 0.65 && isDealerLow && useItem('BEER')) {
+      scheduleDealerTurnDelay();
+      return;
+    }
+
+    // Skip: Use when we want to force player to take a risky shot (high live odds)
+    // This is better than shooting ourselves when odds are against us
+    if (!knownShell && pLive >= 0.65 && hpAdvantage <= 0 && useItem('SKIP')) {
+      scheduleDealerTurnDelay();
+      return;
+    }
+
+    // Random Pill: Use when low HP and no better options (risky but can help)
+    if (isDealerLow && hasItem('RANDOM_PILL') && !hasItem('CIGARETTES') && random() < 0.5 && useItem('RANDOM_PILL')) {
+      scheduleDealerTurnDelay();
+      return;
+    }
+
+    // Steal: Only if we have space and player has items (low priority)
+    if (current.playerInventory.length > 0 && current.dealerInventory.length < MAX_INVENTORY && random() < 0.25 && useItem('STEAL')) {
+      scheduleDealerTurnDelay();
+      return;
+    }
+
+    // Shake Down: Disrupt player if they have multiple items
+    if (current.playerInventory.length >= 2 && random() < 0.2 && useItem('SHAKE_DOWN')) {
+      scheduleDealerTurnDelay();
+      return;
+    }
+
+    // ===== SHOOTING DECISIONS =====
+    // High live odds: shoot player (aggressive)
     if (pLive >= 0.7) {
       aimAndShoot('player');
       return;
     }
 
-    // Low live odds: shoot self to earn skip
+    // Low live odds: shoot self to earn skip (defensive)
     if (pLive <= 0.3) {
       aimAndShoot('dealer');
       return;
     }
 
-    // Mid odds: if glass available, use it; otherwise bias toward player
-    if (hasItem('MAGNIFYING_GLASS') && useItem('MAGNIFYING_GLASS')) {
-      scheduleDealerTurnDelay();
+    // Mid odds (0.3 < pLive < 0.7): Strategic decision
+    // If we have HP advantage, be more aggressive
+    if (hpAdvantage > 0) {
+      aimAndShoot('player');
       return;
     }
-
-    if (random() < 0.65) {
-      aimAndShoot('player');
-    } else {
-      aimAndShoot('dealer');
+    // If player has advantage or equal, be more defensive
+    if (hpAdvantage <= 0) {
+      // If dealer is low, shoot self to get skip
+      if (isDealerLow) {
+        aimAndShoot('dealer');
+        return;
+      }
+      // Otherwise, slight bias toward player (60/40)
+      if (random() < 0.6) {
+        aimAndShoot('player');
+      } else {
+        aimAndShoot('dealer');
+      }
+      return;
     }
   };
 
