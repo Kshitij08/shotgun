@@ -730,14 +730,22 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
     let nextState = { ...state };
     if (state.dealerHealth <= 0) {
       nextState.matchOver = true;
-    nextState.lastOutcome = 'player';
+      nextState.lastOutcome = 'player';
       telemetry.push("MATCH OVER: You win");
-      setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
+      // Delay before showing win screen
+      setTimeout(() => {
+        setAimingAt(null);
+        setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
+      }, 1000);
     } else if (state.playerHealth <= 0) {
       nextState.matchOver = true;
-    nextState.lastOutcome = 'dealer';
+      nextState.lastOutcome = 'dealer';
       telemetry.push("MATCH OVER: Dealer wins");
-      setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
+      // Delay before showing loss screen
+      setTimeout(() => {
+        setAimingAt(null);
+        setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
+      }, 1000);
     }
     return nextState;
   };
@@ -832,18 +840,22 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           // Build queue with exactly 1 spin for each actor
           const queue = [firstSpinner, secondSpinner]; // Exactly 2 entries = 1 per actor
           console.log('[WHEEL] Queue built:', queue, 'spinsPerActor:', spinsPerActor, 'shooter:', shooter, 'nextTurn:', nextTurn, 'isLive:', isLive);
-          setWheelState({
-            active: true,
-            queue,
-            pool: Object.keys(ITEM_CONFIG),
-            spinning: false,
-            rotation: 0,
-            lastItem: null,
-            currentOwner: queue[0] || null,
-            startTurn: nextTurn
-          });
-          spinLockRef.current = false; // Ensure lock is clear when wheel opens
-          return nextState; // wheel will continue flow
+          // Delay before showing wheel and reset aim
+          setTimeout(() => {
+            setAimingAt(null);
+            setWheelState({
+              active: true,
+              queue,
+              pool: Object.keys(ITEM_CONFIG),
+              spinning: false,
+              rotation: 0,
+              lastItem: null,
+              currentOwner: queue[0] || null,
+              startTurn: nextTurn
+            });
+            spinLockRef.current = false; // Ensure lock is clear when wheel opens
+          }, 1000);
+          return nextState; // wheel will continue flow after delay
         }
         nextState = startRoundFromState(nextState, [], nextTurn);
       } else {
@@ -1610,23 +1622,25 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                 >
                    {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
                 </button>
-                <div className="w-24 h-1 bg-zinc-800 rounded-full overflow-hidden group-hover:bg-zinc-700 transition-colors">
-                   <div 
-                     className={`h-full bg-red-600 transition-all duration-200 ${isMuted ? 'w-0' : ''}`} 
-                     style={{ width: isMuted ? '0%' : `${volume}%` }} 
+                <div className="relative w-24 h-4 flex items-center">
+                   <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden group-hover:bg-zinc-700 transition-colors">
+                     <div 
+                       className={`h-full bg-red-600 transition-all duration-200 ${isMuted ? 'w-0' : ''}`} 
+                       style={{ width: isMuted ? '0%' : `${volume}%` }} 
+                     />
+                   </div>
+                   <input 
+                     type="range" 
+                     min="0" 
+                     max="100" 
+                     value={isMuted ? 0 : volume} 
+                     onChange={(e) => {
+                       setVolume(Number(e.target.value));
+                       if (Number(e.target.value) > 0) setIsMuted(false);
+                     }}
+                     className="absolute inset-0 opacity-0 w-full cursor-pointer"
                    />
                 </div>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="100" 
-                  value={isMuted ? 0 : volume} 
-                  onChange={(e) => {
-                    setVolume(e.target.value);
-                    if (Number(e.target.value) > 0) setIsMuted(false);
-                  }}
-                  className="absolute opacity-0 w-32 cursor-pointer h-8 -ml-2"
-                />
              </div>
 
              {/* Social Links */}
@@ -2265,8 +2279,8 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           <div className="flex gap-8 relative z-10">
             <button 
               onClick={handleShootSelf}
-              onMouseEnter={() => !suppressHoverAim && setAimingAt('self')}
-              onMouseLeave={() => setAimingAt(null)}
+              onMouseEnter={() => isPlayerTurn && !suppressHoverAim && setAimingAt('self')}
+              onMouseLeave={() => isPlayerTurn && !suppressHoverAim && setAimingAt(null)}
               disabled={!isPlayerTurn}
               className="group relative px-8 py-4 bg-zinc-900 border border-zinc-700 text-zinc-300 text-[0.7rem] font-black uppercase tracking-widest hover:border-red-500 hover:text-red-400 transition-all active:scale-95 hover:shadow-[0_0_15px_rgba(220,38,38,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -2274,8 +2288,8 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
             </button>
             <button 
               onClick={handleShootDealer}
-              onMouseEnter={() => !suppressHoverAim && setAimingAt('dealer')}
-              onMouseLeave={() => setAimingAt(null)}
+              onMouseEnter={() => isPlayerTurn && !suppressHoverAim && setAimingAt('dealer')}
+              onMouseLeave={() => isPlayerTurn && !suppressHoverAim && setAimingAt(null)}
               disabled={!isPlayerTurn}
               className="group relative px-8 py-4 bg-zinc-900 border border-zinc-700 text-zinc-300 text-[0.7rem] font-black uppercase tracking-widest hover:border-red-500 hover:text-red-400 transition-all active:scale-95 hover:shadow-[0_0_15px_rgba(220,38,38,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
