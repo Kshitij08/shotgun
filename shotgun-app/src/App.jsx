@@ -1474,10 +1474,10 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         className="flex flex-col items-center gap-2"
         onMouseLeave={clearHoverWithDelay}
       >
-        <div className="text-[0.65rem] text-zinc-300 tracking-[0.32em] uppercase font-bold text-shadow-glow">
+        <div className="text-[0.5rem] sm:text-[0.6rem] md:text-[0.65rem] text-zinc-300 tracking-[0.25em] sm:tracking-[0.32em] uppercase font-bold text-shadow-glow">
           {owner} Items
         </div>
-        <div className="flex gap-2 p-2 bg-zinc-900/80 border border-zinc-700 rounded-lg backdrop-blur-sm shadow-[0_0_20px_rgba(20,0,0,0.5)]">
+        <div className="flex gap-2 sm:gap-2 p-2 sm:p-2 bg-zinc-900/80 border border-zinc-700 rounded-lg backdrop-blur-sm shadow-[0_0_20px_rgba(20,0,0,0.5)]">
           {[...Array(max)].map((_, i) => {
             const item = items[i];
             // Check hover by comparing item id
@@ -1497,7 +1497,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                   if (item) setHoverItem(item);
                 }}
                 onMouseLeave={clearHoverWithDelay}
-                className={`w-12 h-12 border flex items-center justify-center transition-all duration-200 relative overflow-hidden rounded-md
+                className={`w-12 h-12 sm:w-10 sm:h-10 md:w-12 md:h-12 border flex items-center justify-center transition-all duration-200 relative overflow-hidden rounded-md
                   ${item 
                     ? `bg-zinc-800 shadow-inner ${isPlayer ? 'cursor-pointer' : 'cursor-default'} ${isHovered ? 'border-red-500 scale-110 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'border-red-500/50 hover:border-red-400'}`
                     : 'bg-transparent border-zinc-800 text-zinc-700'
@@ -1505,7 +1505,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               >
                 {item ? (
                   <div className={`transition-colors duration-200 ${isHovered ? 'text-red-400' : 'text-zinc-200'}`}>
-                    {React.cloneElement(item.icon, { className: "w-5 h-5" })}
+                    {React.cloneElement(item.icon, { className: "w-5 h-5 sm:w-4 sm:h-4 md:w-5 md:h-5" })}
                   </div>
                 ) : (
                   <div className="w-1 h-1 bg-zinc-700 rounded-full" />
@@ -1519,11 +1519,11 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
   };
 
   const HealthBar = ({ health, max = 4, side = 'left' }) => (
-    <div className={`flex items-center gap-2 ${side === 'right' ? 'flex-row-reverse' : ''}`}>
+    <div className={`flex items-center gap-1.5 sm:gap-1 md:gap-2 ${side === 'right' ? 'flex-row-reverse' : ''}`}>
       {[...Array(max)].map((_, i) => (
         <div 
           key={i} 
-          className={`w-8 h-10 border-2 transition-all duration-1000 ${
+          className={`w-6 h-7 sm:w-5 sm:h-6 md:w-6 md:h-8 lg:w-8 lg:h-10 border-2 transition-all duration-1000 ${
             i < health 
               ? 'bg-red-600 border-red-400 shadow-[0_0_15px_rgba(220,38,38,0.6)] animate-pulse-slow' 
               : 'bg-zinc-900 border-zinc-800 opacity-50'
@@ -1825,74 +1825,127 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       )}
 
       {/* TOP HEADER */}
-      <header className="p-6 bg-transparent relative z-50 flex justify-between items-center border-b border-red-500/20">
-        <div className="flex items-center gap-4 flex-1">
-          <div className="w-12 h-12 bg-zinc-900 border border-zinc-700 flex items-center justify-center rounded relative overflow-hidden group shadow-[0_0_20px_rgba(0,0,0,0.5)]">
-            <div className="absolute inset-0 bg-red-900/10"></div>
-            <div className="relative z-10 opacity-90">
-                <User className="text-zinc-400 w-6 h-6" />
+      <header className="p-2 sm:p-3 md:p-4 lg:p-6 bg-transparent relative z-50 border-b border-red-500/20 overflow-hidden min-w-0">
+        {/* Desktop Layout: Original 3-column layout */}
+        <div className="hidden sm:flex justify-between items-center">
+          <div className="flex items-center gap-2 md:gap-4 flex-1">
+            <div className="w-8 h-8 sm:w-8 sm:h-8 md:w-10 md:h-10 lg:w-12 lg:h-12 bg-zinc-900 border border-zinc-700 flex items-center justify-center rounded relative overflow-hidden group shadow-[0_0_20px_rgba(0,0,0,0.5)]">
+              <div className="absolute inset-0 bg-red-900/10"></div>
+              <div className="relative z-10 opacity-90">
+                  <User className="text-zinc-400 w-4 h-4 md:w-5 md:h-5 lg:w-6 lg:h-6" />
+              </div>
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-[0.5rem] md:text-[0.6rem] lg:text-[0.65rem] text-red-500 font-bold tracking-tighter mb-0.5 sm:mb-1 text-shadow-aberration truncate">UNIT_PLAYER_01</div>
+              <div className="flex items-center gap-1 md:gap-2">
+                <HealthBar health={gameState.playerHealth} />
+                {gameState.tempEffects?.player?.shieldNextDamage > 0 && (
+                  <div className="flex items-center gap-0.5 sm:gap-1 px-1 sm:px-2 py-0.5 sm:py-1 bg-blue-900/30 border border-blue-500/50 rounded text-blue-400 animate-pulse flex-shrink-0">
+                    <Shield className="w-2 h-2 sm:w-2.5 sm:h-2.5 md:w-3 md:h-3" />
+                    <span className="text-[0.45rem] sm:text-[0.5rem] md:text-[0.6rem] font-bold">{gameState.tempEffects.player.shieldNextDamage}</span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-          <div>
-            <div className="text-[0.65rem] text-red-500 font-bold tracking-tighter mb-1 text-shadow-aberration">UNIT_PLAYER_01</div>
-            <div className="flex items-center gap-2">
-              <HealthBar health={gameState.playerHealth} />
-              {gameState.tempEffects?.player?.shieldNextDamage > 0 && (
-                <div className="flex items-center gap-1 px-2 py-1 bg-blue-900/30 border border-blue-500/50 rounded text-blue-400 animate-pulse">
-                  <Shield className="w-3 h-3" />
-                  <span className="text-[0.6rem] font-bold">{gameState.tempEffects.player.shieldNextDamage}</span>
-                </div>
-              )}
+
+          {/* --- ECONOMY HUD --- */}
+          <div className="flex flex-col items-center px-2">
+            <div className="flex flex-col items-center gap-1 md:gap-2">
+              <div className="text-xs md:text-sm lg:text-base font-black tracking-[0.2em] md:tracking-[0.3em] lg:tracking-[0.35em] uppercase drop-shadow-[0_0_8px_rgba(220,38,38,0.5)] flex items-center gap-2 md:gap-3">
+                <span className="text-red-500 whitespace-nowrap">Round {gameState.round}</span>
+                <span className="text-zinc-600">•</span>
+                <span className="text-zinc-400 whitespace-nowrap">Rate:</span>
+                <span className="text-white whitespace-nowrap">2x</span>
+              </div>
+              <div className="text-[0.65rem] md:text-xs lg:text-sm text-zinc-300 font-bold flex items-center gap-1.5 md:gap-2">
+                <span className="text-red-400 drop-shadow-[0_0_8px_rgba(220,38,38,0.6)] whitespace-nowrap">LIVE: {gameState.liveShells}</span>
+                <span className="opacity-30">|</span>
+                <span className="text-zinc-400 whitespace-nowrap">BLANK: {gameState.blankShells}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 md:gap-4 flex-row-reverse flex-1">
+            <div className="w-8 h-8 sm:w-8 sm:h-8 md:w-10 md:h-10 lg:w-12 lg:h-12 bg-zinc-900 border border-zinc-700 flex items-center justify-center rounded relative overflow-hidden group shadow-[0_0_20px_rgba(0,0,0,0.5)]">
+              <div className="relative w-full h-full flex items-center justify-center">
+                 <div className="w-1 h-1 bg-red-600 rounded-full absolute left-2 md:left-3 shadow-[0_0_8px_red]" />
+                 <div className="w-1 h-1 bg-red-600 rounded-full absolute right-2 md:right-3 shadow-[0_0_8px_red]" />
+              </div>
+            </div>
+            <div className="text-right min-w-0 flex-1">
+              <div className="text-[0.5rem] md:text-[0.6rem] lg:text-[0.65rem] text-red-500 font-bold tracking-tighter mb-0.5 sm:mb-1 text-shadow-aberration truncate">THE_DEALER</div>
+              <div className="flex items-center gap-1 md:gap-2 justify-end">
+                {gameState.tempEffects?.dealer?.shieldNextDamage > 0 && (
+                  <div className="flex items-center gap-0.5 sm:gap-1 px-1 sm:px-2 py-0.5 sm:py-1 bg-blue-900/30 border border-blue-500/50 rounded text-blue-400 animate-pulse flex-shrink-0">
+                    <Shield className="w-2 h-2 sm:w-2.5 sm:h-2.5 md:w-3 md:h-3" />
+                    <span className="text-[0.45rem] sm:text-[0.5rem] md:text-[0.6rem] font-bold">{gameState.tempEffects.dealer.shieldNextDamage}</span>
+                  </div>
+                )}
+                <HealthBar health={gameState.dealerHealth} side="right" />
+              </div>
             </div>
           </div>
         </div>
 
-        {/* --- ECONOMY HUD --- */}
-        <div className="flex flex-col items-center">
-          <div className="text-base font-black tracking-[0.35em] uppercase mb-3 flex items-center gap-3 drop-shadow-[0_0_8px_rgba(220,38,38,0.5)]">
-            <span className="text-red-500">Round {gameState.round}</span>
-            <span className="text-zinc-600">•</span>
-            <span className="text-zinc-400">Rate:</span>
-            <span className="text-white">2x</span>
-          </div>
-          <div className="text-sm text-zinc-300 font-bold">
-            <span className="text-red-400 drop-shadow-[0_0_8px_rgba(220,38,38,0.6)]">LIVE: {gameState.liveShells}</span> <span className="mx-2 opacity-30">|</span> <span className="text-zinc-400">BLANK: {gameState.blankShells}</span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-4 flex-row-reverse flex-1">
-          <div className="w-12 h-12 bg-zinc-900 border border-zinc-700 flex items-center justify-center rounded relative overflow-hidden group shadow-[0_0_20px_rgba(0,0,0,0.5)]">
-            <div className="relative w-full h-full flex items-center justify-center">
-               <div className="w-1 h-1 bg-red-600 rounded-full absolute left-3 shadow-[0_0_8px_red]" />
-               <div className="w-1 h-1 bg-red-600 rounded-full absolute right-3 shadow-[0_0_8px_red]" />
+        {/* Mobile Layout: Health bars on top, HUD text below */}
+        <div className="flex sm:hidden flex-col gap-2">
+          {/* Health bars row */}
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col items-start gap-1">
+              <div className="text-[0.5rem] text-red-500 font-bold tracking-tighter text-shadow-aberration">UNIT_PLAYER_01</div>
+              <div className="flex items-center gap-2">
+                <HealthBar health={gameState.playerHealth} />
+                {gameState.tempEffects?.player?.shieldNextDamage > 0 && (
+                  <div className="flex items-center gap-0.5 px-1 py-0.5 bg-blue-900/30 border border-blue-500/50 rounded text-blue-400 animate-pulse flex-shrink-0">
+                    <Shield className="w-2.5 h-2.5" />
+                    <span className="text-[0.5rem] font-bold">{gameState.tempEffects.player.shieldNextDamage}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex flex-col items-end gap-1">
+              <div className="text-[0.5rem] text-red-500 font-bold tracking-tighter text-shadow-aberration">THE_DEALER</div>
+              <div className="flex items-center gap-2">
+                {gameState.tempEffects?.dealer?.shieldNextDamage > 0 && (
+                  <div className="flex items-center gap-0.5 px-1 py-0.5 bg-blue-900/30 border border-blue-500/50 rounded text-blue-400 animate-pulse flex-shrink-0">
+                    <Shield className="w-2.5 h-2.5" />
+                    <span className="text-[0.5rem] font-bold">{gameState.tempEffects.dealer.shieldNextDamage}</span>
+                  </div>
+                )}
+                <HealthBar health={gameState.dealerHealth} side="right" />
+              </div>
             </div>
           </div>
-          <div className="text-right">
-            <div className="text-[0.65rem] text-red-500 font-bold tracking-tighter mb-1 text-shadow-aberration">THE_DEALER</div>
-            <div className="flex items-center gap-2 justify-end">
-              {gameState.tempEffects?.dealer?.shieldNextDamage > 0 && (
-                <div className="flex items-center gap-1 px-2 py-1 bg-blue-900/30 border border-blue-500/50 rounded text-blue-400 animate-pulse">
-                  <Shield className="w-3 h-3" />
-                  <span className="text-[0.6rem] font-bold">{gameState.tempEffects.dealer.shieldNextDamage}</span>
-                </div>
-              )}
-              <HealthBar health={gameState.dealerHealth} side="right" />
+          
+          {/* HUD text row */}
+          <div className="flex flex-col items-center gap-1">
+            <div className="text-sm font-black tracking-[0.2em] uppercase drop-shadow-[0_0_8px_rgba(220,38,38,0.5)] flex items-center gap-2">
+              <span className="text-red-500 whitespace-nowrap">Round {gameState.round}</span>
+              <span className="text-zinc-600">•</span>
+              <span className="text-zinc-400 whitespace-nowrap">Rate:</span>
+              <span className="text-white whitespace-nowrap">2x</span>
+            </div>
+            <div className="text-sm text-zinc-300 font-bold flex items-center gap-2">
+              <span className="text-red-400 drop-shadow-[0_0_8px_rgba(220,38,38,0.6)] whitespace-nowrap">LIVE: {gameState.liveShells}</span>
+              <span className="opacity-30">|</span>
+              <span className="text-zinc-400 whitespace-nowrap">BLANK: {gameState.blankShells}</span>
             </div>
           </div>
         </div>
       </header>
 
       {/* GAME TABLE AREA */}
-      <main className={`flex-1 relative flex flex-col items-center justify-between pt-8 pb-8 px-8 bg-transparent z-40 ${shotEffect ? 'animate-shake' : ''}`}>
+      <main className={`flex-1 relative flex flex-col items-center justify-between pt-4 sm:pt-8 pb-4 sm:pb-8 px-4 sm:px-8 bg-transparent z-40 overflow-x-hidden ${shotEffect ? 'animate-shake' : ''}`}>
         
         {/* TOP SECTION: Dealer Eyes & Inventory */}
-        <div className="flex flex-col items-center gap-2 w-full -mt-8">
+        <div className="flex flex-col items-center gap-2 w-full -mt-4 sm:-mt-8">
           <div className="relative group" ref={gameEyesRef}>
-               <div className={`absolute -inset-24 bg-red-900/5 blur-[90px] rounded-full pointer-events-none transition-all duration-300 ${shotEffect === 'dealer' ? 'bg-red-600/30 blur-[120px]' : ''} animate-pulse-slow`} />
-               <div className="absolute -inset-20 bg-white/10 blur-[110px] rounded-full pointer-events-none opacity-60" />
+               <div className={`absolute -inset-12 sm:-inset-24 bg-red-900/5 blur-[60px] sm:blur-[90px] rounded-full pointer-events-none transition-all duration-300 ${shotEffect === 'dealer' ? 'bg-red-600/30 blur-[80px] sm:blur-[120px]' : ''} animate-pulse-slow`} />
+               <div className="absolute -inset-10 sm:-inset-20 bg-white/10 blur-[70px] sm:blur-[110px] rounded-full pointer-events-none opacity-60" />
                
                <div
-                 className={`w-48 h-32 flex items-center justify-center relative transition-transform duration-200 ${shotEffect === 'dealer' ? 'scale-125' : ''} ${
+                 className={`w-40 h-24 sm:w-48 sm:h-32 flex items-center justify-center relative transition-transform duration-200 ${shotEffect === 'dealer' ? 'scale-125' : ''} ${
                    aimingAt === 'dealer'
                      ? 'scale-125 saturate-150 animate-[fear-wiggle_0.6s_ease-in-out_infinite]'
                      : aimingAt === 'self'
@@ -1901,19 +1954,19 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                  }`}
                >
                  <div
-                   className="absolute left-[30%] -translate-x-1/2 flex flex-col items-center"
+                   className="absolute left-[25%] sm:left-[30%] -translate-x-1/2 flex flex-col items-center"
                    style={{ transform: `translate(${calcDealerEyeOffset(-30).x}px, ${calcDealerEyeOffset(-30).y}px)` }}
                  >
                    <div
                      className={`rounded-full transition-all duration-200 animate-blink ${
                        shotEffect === 'dealer'
-                         ? 'bg-red-600 shadow-[0_0_30px_red] w-8 h-8'
-                         : 'bg-zinc-100 shadow-[0_0_25px_rgba(255,255,255,0.6)] w-5 h-5'
+                         ? 'bg-red-600 shadow-[0_0_30px_red] w-6 h-6 sm:w-6 sm:h-6 md:w-8 md:h-8'
+                         : 'bg-zinc-100 shadow-[0_0_25px_rgba(255,255,255,0.6)] w-4 h-4 sm:w-4 sm:h-4 md:w-5 md:h-5'
                      } ${
                        aimingAt === 'dealer'
-                         ? 'w-8 h-8 bg-red-500 shadow-[0_0_35px_rgba(220,38,38,0.8)]'
+                         ? 'w-6 h-6 sm:w-6 sm:h-6 md:w-8 md:h-8 bg-red-500 shadow-[0_0_35px_rgba(220,38,38,0.8)]'
                          : aimingAt === 'self'
-                           ? 'w-7 h-7 bg-red-500 shadow-[0_0_35px_rgba(220,38,38,0.7)]'
+                           ? 'w-5 h-5 sm:w-5 sm:h-5 md:w-7 md:h-7 bg-red-500 shadow-[0_0_35px_rgba(220,38,38,0.7)]'
                            : ''
                      }`}
                      style={{
@@ -1930,19 +1983,19 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                  </div>
 
                  <div
-                   className="absolute right-[30%] translate-x-1/2 flex flex-col items-center"
+                   className="absolute right-[25%] sm:right-[30%] translate-x-1/2 flex flex-col items-center"
                    style={{ transform: `translate(${calcDealerEyeOffset(30).x}px, ${calcDealerEyeOffset(30).y}px)` }}
                  >
                    <div
                      className={`rounded-full transition-all duration-200 animate-blink ${
                        shotEffect === 'dealer'
-                         ? 'bg-red-600 shadow-[0_0_30px_red] w-8 h-8'
-                         : 'bg-zinc-100 shadow-[0_0_25px_rgba(255,255,255,0.6)] w-5 h-5'
+                         ? 'bg-red-600 shadow-[0_0_30px_red] w-6 h-6 sm:w-6 sm:h-6 md:w-8 md:h-8'
+                         : 'bg-zinc-100 shadow-[0_0_25px_rgba(255,255,255,0.6)] w-4 h-4 sm:w-4 sm:h-4 md:w-5 md:h-5'
                      } ${
                        aimingAt === 'dealer'
-                         ? 'w-8 h-8 bg-red-500 shadow-[0_0_35px_rgba(220,38,38,0.8)]'
+                         ? 'w-6 h-6 sm:w-6 sm:h-6 md:w-8 md:h-8 bg-red-500 shadow-[0_0_35px_rgba(220,38,38,0.8)]'
                          : aimingAt === 'self'
-                           ? 'w-7 h-7 bg-red-500 shadow-[0_0_35px_rgba(220,38,38,0.7)]'
+                           ? 'w-5 h-5 sm:w-5 sm:h-5 md:w-7 md:h-7 bg-red-500 shadow-[0_0_35px_rgba(220,38,38,0.7)]'
                            : ''
                      }`}
                      style={{
@@ -1962,18 +2015,18 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                </div>
           </div>
 
-          <div className="animate-in fade-in slide-in-from-top-4 duration-1000 mt-6 relative z-10 opacity-90 flex flex-col items-center">
+          <div className="animate-in fade-in slide-in-from-top-4 duration-1000 mt-2 sm:mt-6 relative z-10 opacity-90 flex flex-col items-center">
             {/* Dealer's Turn/Skip Indicator - fixed height to prevent layout shift */}
-            <div className="h-8 flex items-center justify-center gap-2 mb-1">
+            <div className="h-6 sm:h-8 flex items-center justify-center gap-1 sm:gap-2 mb-1">
               {turnLabel && gameState.currentTurn === 'dealer' && (
-                <div className="flex items-center gap-2 px-4 py-1 bg-zinc-900/80 border border-red-500/50 text-[0.65rem] font-bold uppercase tracking-[0.2em] rounded-full shadow-[0_0_12px_rgba(248,113,113,0.3)]">
-                  <span className="w-2 h-2 rounded-full bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.8)] animate-pulse" />
+                <div className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-0.5 sm:py-1 bg-zinc-900/80 border border-red-500/50 text-[0.5rem] sm:text-[0.65rem] font-bold uppercase tracking-[0.15em] sm:tracking-[0.2em] rounded-full shadow-[0_0_12px_rgba(248,113,113,0.3)]">
+                  <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.8)] animate-pulse" />
                   <span className="text-red-300">Dealer Turn</span>
                 </div>
               )}
               {pendingDealerSkips > 0 && (
-                <div className="flex items-center gap-2 px-3 py-1 bg-yellow-900/30 border border-yellow-500/50 text-[0.6rem] font-bold uppercase tracking-[0.15em] rounded-full shadow-[0_0_10px_rgba(234,179,8,0.2)]">
-                  <SkipForward className="w-3 h-3 text-yellow-400" />
+                <div className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-0.5 sm:py-1 bg-yellow-900/30 border border-yellow-500/50 text-[0.5rem] sm:text-[0.6rem] font-bold uppercase tracking-[0.1em] sm:tracking-[0.15em] rounded-full shadow-[0_0_10px_rgba(234,179,8,0.2)]">
+                  <SkipForward className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-yellow-400" />
                   <span className="text-yellow-300">Dealer Skip: {pendingDealerSkips}</span>
                 </div>
               )}
@@ -1984,22 +2037,22 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         </div>
 
         {/* MIDDLE SECTION: THE SHOTGUN */}
-        <div className="flex-1 flex items-center justify-center w-full max-w-3xl relative py-4 z-20 -mt-20">
+        <div className="flex-1 flex items-center justify-center w-full max-w-3xl relative py-2 sm:py-4 z-20 -mt-10 sm:-mt-20">
       {wheelState.active && (
         <div className="fixed inset-0 z-[250] bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center pointer-events-auto font-mono">
-            <div className="text-center mb-8 animate-in slide-in-from-top-4">
-            <h2 className="text-2xl font-black text-white tracking-[0.3em] uppercase mb-2 text-shadow-aberration">
+            <div className="text-center mb-8 sm:mb-8 animate-in slide-in-from-top-4 px-4">
+            <h2 className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-[0.2em] sm:tracking-[0.3em] uppercase mb-2 text-shadow-aberration">
               {wheelState.currentOwner === 'player' ? "PLAYER DISTRIBUTION" : "DEALER DISTRIBUTION"}
             </h2>
-            <p className="text-zinc-500 text-xs font-mono uppercase tracking-widest">
+            <p className="text-zinc-500 text-[0.6rem] sm:text-xs font-mono uppercase tracking-widest">
               {wheelState.currentOwner === 'player' ? "Initiate Spin Sequence" : "Automated Dispenser Active"}
             </p>
-            <div className="mt-2 text-red-500 font-bold text-xs uppercase tracking-widest animate-pulse">
+            <div className="mt-2 mb-2 sm:mb-0 text-red-500 font-bold text-[0.6rem] sm:text-xs uppercase tracking-widest animate-pulse">
               {remainingSpins} Spins Remaining
             </div>
           </div>
 
-          <div className="relative w-96 h-96 mb-12">
+          <div className="relative w-64 h-64 sm:w-80 sm:h-80 md:w-96 md:h-96 mb-6 sm:mb-12">
             <div className="absolute -top-8 left-1/2 -translate-x-1/2 z-30 filter drop-shadow-[0_4px_4px_rgba(0,0,0,0.8)]">
                 <svg width="40" height="60" viewBox="0 0 40 60" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M20 60L5 20H35L20 60Z" fill="#ef4444" stroke="#7f1d1d" strokeWidth="2" />
@@ -2034,8 +2087,8 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                 const iconConfig = ITEM_CONFIG[kind];
                 if (!iconConfig) return null;
                 const isHovered = hoveredWheelItem === kind;
-                // Calculate position on the wheel edge (radius ~140px from center of 192px wheel)
-                const radius = 140;
+                // Calculate position on the wheel edge (responsive radius)
+                const radius = window.innerWidth < 640 ? 90 : window.innerWidth < 768 ? 110 : 140;
                 const radians = (contentRotation - 90) * (Math.PI / 180);
                 const x = Math.cos(radians) * radius;
                 const y = Math.sin(radians) * radius;
@@ -2051,12 +2104,12 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                     }}
                   >
                     <div 
-                      className={`p-3 bg-zinc-900/80 rounded-full border shadow-inner backdrop-blur-sm transition-all duration-200 cursor-pointer ${isHovered ? 'border-red-500 scale-125 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'border-zinc-800 hover:border-zinc-600'}`}
+                      className={`p-2 sm:p-2.5 md:p-3 bg-zinc-900/80 rounded-full border shadow-inner backdrop-blur-sm transition-all duration-200 cursor-pointer ${isHovered ? 'border-red-500 scale-125 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'border-zinc-800 hover:border-zinc-600'}`}
                       onMouseEnter={() => setHoveredWheelItem(kind)}
                       onMouseLeave={() => setHoveredWheelItem(null)}
                     >
                       <div className={`transition-colors duration-200 ${isHovered ? 'text-red-400' : 'text-zinc-400'}`}>
-                        {React.cloneElement(iconConfig.icon, { className: "w-5 h-5" })}
+                        {React.cloneElement(iconConfig.icon, { className: "w-3 h-3 sm:w-4 sm:h-4 md:w-5 md:h-5" })}
                       </div>
                     </div>
                   </div>
@@ -2065,9 +2118,9 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               <div className="absolute inset-[30%] rounded-full border border-zinc-800/50 pointer-events-none" />
               <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 mix-blend-overlay pointer-events-none" />
             </div>
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 bg-zinc-900 border-4 border-zinc-800 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(0,0,0,0.8)] z-20">
-                <div className="w-16 h-16 rounded-full border border-zinc-700 bg-[conic-gradient(var(--tw-gradient-stops))] from-zinc-800 via-zinc-900 to-zinc-800 flex items-center justify-center">
-                    <Disc className={`w-8 h-8 text-red-900/50 ${wheelState.spinning ? 'animate-spin' : ''} duration-1000`} />
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 bg-zinc-900 border-2 sm:border-4 border-zinc-800 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(0,0,0,0.8)] z-20">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 md:w-16 md:h-16 rounded-full border border-zinc-700 bg-[conic-gradient(var(--tw-gradient-stops))] from-zinc-800 via-zinc-900 to-zinc-800 flex items-center justify-center">
+                    <Disc className={`w-5 h-5 sm:w-6 sm:h-6 md:w-8 md:h-8 text-red-900/50 ${wheelState.spinning ? 'animate-spin' : ''} duration-1000`} />
                 </div>
             </div>
           </div>
@@ -2102,7 +2155,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                 wheelState.currentOwner === 'player' && !wheelState.spinning && (
                     <button 
                         onClick={() => spinWheel('player')}
-                        className="group relative px-12 py-5 bg-zinc-900 border border-zinc-700 text-zinc-300 text-sm font-black uppercase tracking-[0.25em] hover:border-red-500 hover:text-red-400 transition-all active:scale-95 hover:shadow-[0_0_20px_rgba(220,38,38,0.3)]"
+                        className="group relative px-6 sm:px-8 md:px-12 py-3 sm:py-4 md:py-5 bg-zinc-900 border border-zinc-700 text-zinc-300 text-xs sm:text-sm font-black uppercase tracking-[0.2em] sm:tracking-[0.25em] hover:border-red-500 hover:text-red-400 transition-all active:scale-95 hover:shadow-[0_0_20px_rgba(220,38,38,0.3)]"
                     >
                         SPIN
                     </button>
@@ -2117,7 +2170,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           </div>
         </div>
       )}
-          <div className="relative w-full h-40 flex items-center justify-center group cursor-crosshair">
+          <div className="relative w-full h-24 sm:h-32 md:h-40 flex items-center justify-center group cursor-crosshair">
              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3/4 h-24 bg-zinc-800/30 blur-2xl rounded-[100%] transition-all duration-1000" />
              
              <svg 
@@ -2275,14 +2328,21 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         </div>
 
         {/* BOTTOM SECTION: Inputs & Player Inventory */}
-        <div className="flex flex-col items-center gap-4 w-full mb-0">
-          <div className="flex gap-8 relative z-10">
+        <div className="flex flex-col items-center gap-2 sm:gap-4 w-full mb-0">
+          {/* Mobile Telemetry - Single Line */}
+          <div className="sm:hidden w-full px-4 mb-2">
+            <div className="text-[0.65rem] text-red-400 font-bold text-center truncate animate-pulse-slow">
+              {gameState.log.length > 0 ? (gameState.log[gameState.log.length - 1] ?? '').toString().toUpperCase() : ''}
+            </div>
+          </div>
+          
+          <div className="flex gap-4 sm:gap-6 md:gap-8 relative z-10">
             <button 
               onClick={handleShootSelf}
               onMouseEnter={() => isPlayerTurn && !suppressHoverAim && setAimingAt('self')}
               onMouseLeave={() => isPlayerTurn && !suppressHoverAim && setAimingAt(null)}
               disabled={!isPlayerTurn}
-              className="group relative px-8 py-4 bg-zinc-900 border border-zinc-700 text-zinc-300 text-[0.7rem] font-black uppercase tracking-widest hover:border-red-500 hover:text-red-400 transition-all active:scale-95 hover:shadow-[0_0_15px_rgba(220,38,38,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="group relative px-6 sm:px-6 md:px-8 py-3 sm:py-3 md:py-4 bg-zinc-900 border border-zinc-700 text-zinc-300 text-sm sm:text-[0.65rem] md:text-[0.7rem] font-black uppercase tracking-widest hover:border-red-500 hover:text-red-400 transition-all active:scale-95 hover:shadow-[0_0_15px_rgba(220,38,38,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Point at Self
             </button>
@@ -2291,7 +2351,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               onMouseEnter={() => isPlayerTurn && !suppressHoverAim && setAimingAt('dealer')}
               onMouseLeave={() => isPlayerTurn && !suppressHoverAim && setAimingAt(null)}
               disabled={!isPlayerTurn}
-              className="group relative px-8 py-4 bg-zinc-900 border border-zinc-700 text-zinc-300 text-[0.7rem] font-black uppercase tracking-widest hover:border-red-500 hover:text-red-400 transition-all active:scale-95 hover:shadow-[0_0_15px_rgba(220,38,38,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="group relative px-6 sm:px-6 md:px-8 py-3 sm:py-3 md:py-4 bg-zinc-900 border border-zinc-700 text-zinc-300 text-sm sm:text-[0.65rem] md:text-[0.7rem] font-black uppercase tracking-widest hover:border-red-500 hover:text-red-400 transition-all active:scale-95 hover:shadow-[0_0_15px_rgba(220,38,38,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Point at Him
             </button>
@@ -2314,16 +2374,16 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
             </div>
 
             {/* Player's Turn/Skip Indicator - fixed height to prevent layout shift */}
-            <div className="h-8 flex items-center justify-center gap-2 mb-1">
+            <div className="h-6 sm:h-8 flex items-center justify-center gap-1 sm:gap-2 mb-1">
               {turnLabel && gameState.currentTurn === 'player' && (
-                <div className="flex items-center gap-2 px-4 py-1 bg-zinc-900/80 border border-green-500/50 text-[0.65rem] font-bold uppercase tracking-[0.2em] rounded-full shadow-[0_0_12px_rgba(74,222,128,0.3)]">
-                  <span className="w-2 h-2 rounded-full bg-green-400 shadow-[0_0_6px_rgba(74,222,128,0.8)] animate-pulse" />
+                <div className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-0.5 sm:py-1 bg-zinc-900/80 border border-green-500/50 text-[0.5rem] sm:text-[0.65rem] font-bold uppercase tracking-[0.15em] sm:tracking-[0.2em] rounded-full shadow-[0_0_12px_rgba(74,222,128,0.3)]">
+                  <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-green-400 shadow-[0_0_6px_rgba(74,222,128,0.8)] animate-pulse" />
                   <span className="text-green-300">Your Turn</span>
                 </div>
               )}
               {pendingPlayerSkips > 0 && (
-                <div className="flex items-center gap-2 px-3 py-1 bg-yellow-900/30 border border-yellow-500/50 text-[0.6rem] font-bold uppercase tracking-[0.15em] rounded-full shadow-[0_0_10px_rgba(234,179,8,0.2)]">
-                  <SkipForward className="w-3 h-3 text-yellow-400" />
+                <div className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-0.5 sm:py-1 bg-yellow-900/30 border border-yellow-500/50 text-[0.5rem] sm:text-[0.6rem] font-bold uppercase tracking-[0.1em] sm:tracking-[0.15em] rounded-full shadow-[0_0_10px_rgba(234,179,8,0.2)]">
+                  <SkipForward className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-yellow-400" />
                   <span className="text-yellow-300">You Skip: {pendingPlayerSkips}</span>
                 </div>
               )}
