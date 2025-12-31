@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
+import { CONTRACT_CONFIG, SHOTGUN_ROULETTE_ABI } from './contractConfig';
 import { 
   Skull, 
   User,
@@ -343,6 +344,9 @@ const App = () => {
   const [connectionError, setConnectionError] = useState(null);
   const providerRef = useRef(null);
   const signerRef = useRef(null);
+  const contractRef = useRef(null);
+  const [isContractLoading, setIsContractLoading] = useState(false);
+  const rewardClaimedRef = useRef(false);
 
   // --- CRYPTO / BETTING STATE ---
   const [cryptoState, setCryptoState] = useState({
@@ -375,7 +379,10 @@ const App = () => {
     dealerInventory: [],
     log: ["System initialized.", "Waiting for wager..."],
     statusEffects: freshStatus(),
-    tempEffects: freshTempEffects(),
+    tempEffects: {
+      player: { doubleDamageNextShot: false, shieldNextDamage: 0 },
+      dealer: { doubleDamageNextShot: false, shieldNextDamage: 0 }
+    },
     knowledge: freshKnowledge(),
     currentTurn: 'player',
     matchOver: false,
@@ -403,6 +410,16 @@ const App = () => {
         if (chainId === MONAD_CHAIN_ID) {
           providerRef.current = provider;
           signerRef.current = await provider.getSigner();
+          
+          // Initialize contract if address is configured
+          if (CONTRACT_CONFIG.address && CONTRACT_CONFIG.address !== '0x0000000000000000000000000000000000000000') {
+            contractRef.current = new ethers.Contract(
+              CONTRACT_CONFIG.address,
+              SHOTGUN_ROULETTE_ABI,
+              signerRef.current
+            );
+          }
+          
           const address = await signerRef.current.getAddress();
           const balance = await provider.getBalance(address);
           
@@ -485,6 +502,15 @@ const App = () => {
       const provider = new ethers.BrowserProvider(window.ethereum);
       providerRef.current = provider;
       signerRef.current = await provider.getSigner();
+
+      // Initialize contract
+      if (CONTRACT_CONFIG.address !== '0x0000000000000000000000000000000000000000') {
+        contractRef.current = new ethers.Contract(
+          CONTRACT_CONFIG.address,
+          SHOTGUN_ROULETTE_ABI,
+          signerRef.current
+        );
+      }
 
       // Get address and balance
       const address = await signerRef.current.getAddress();
@@ -884,6 +910,9 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
     const { updatedStatus, nextTurn, telemetry: skipMessages } = resolveSkips(state.statusEffects, startTurn);
 
+    // Reset temp effects at round start
+    const initialTempEffects = freshTempEffects();
+
     return {
       ...state,
       round: state.round + 1,
@@ -892,7 +921,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       blankShells: blankCount,
       currentShellIndex: 0,
       knowledge: freshKnowledge(),
-      tempEffects: freshTempEffects(), // Reset temp effects at round start
+      tempEffects: initialTempEffects, // Reset temp effects at round start (with shield for match start)
       playerInventory: state.playerInventory,
       dealerInventory: state.dealerInventory,
       statusEffects: updatedStatus,
@@ -907,28 +936,82 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
     return startRoundFromState(state, telemetry);
   };
 
-  const handleStartGame = () => {
+  const handleStartGame = async () => {
     const wager = 1;
     if (wager > cryptoState.balance) {
       setTelemetry("INSUFFICIENT FUNDS.");
       return;
     }
-    const seed = Math.floor((Date.now() ^ Math.floor(Math.random() * 1_000_000_000)) >>> 0);
-    reseed(seed);
-    const baseState = createInitialGameState(seed);
-    const nextState = startRoundFromState(baseState, [`MATCH INIT: seed ${seed}`]);
 
-    setCryptoState(prev => ({
-      ...prev,
-      balance: prev.balance - wager,
-      currentWager: wager,
-      multiplier: 1.2,
-      phase: 'playing'
-    }));
+    // Check if contract is configured
+    if (!contractRef.current) {
+      setTelemetry("CONTRACT NOT INITIALIZED. Please connect your wallet first.");
+      return;
+    }
     
-    setGameState(nextState);
-    setIsSawedOff(false);
-    setShotEffect(null);
+    if (!CONTRACT_CONFIG.address || CONTRACT_CONFIG.address === '0x0000000000000000000000000000000000000000') {
+      setTelemetry("CONTRACT NOT CONFIGURED. Please deploy contract and update CONTRACT_ADDRESS.");
+      return;
+    }
+
+    setIsContractLoading(true);
+    setTelemetry("Initializing contract...");
+
+    try {
+      // Check if player already has an active game
+      const hasActive = await contractRef.current.hasActiveGame(cryptoState.walletAddress);
+      if (hasActive) {
+        setTelemetry("Game already in progress. Please finish current game first.");
+        setIsContractLoading(false);
+        return;
+      }
+
+      // Call contract to start game (pays 1 MON)
+      const playFee = ethers.parseEther("1.0");
+      const tx = await contractRef.current.startGame({ value: playFee });
+      setTelemetry("Transaction sent. Waiting for confirmation...");
+      
+      await tx.wait();
+      setTelemetry("Game started! Contract initialized.");
+
+      // Update balance after payment
+      if (providerRef.current) {
+        const balance = await providerRef.current.getBalance(cryptoState.walletAddress);
+        setCryptoState(prev => ({
+          ...prev,
+          balance: parseFloat(ethers.formatEther(balance))
+        }));
+      }
+
+      // Start the game
+      const seed = Math.floor((Date.now() ^ Math.floor(Math.random() * 1_000_000_000)) >>> 0);
+      reseed(seed);
+      const baseState = createInitialGameState(seed);
+      const nextState = startRoundFromState(baseState, [`MATCH INIT: seed ${seed}`]);
+
+      setCryptoState(prev => ({
+        ...prev,
+        currentWager: wager,
+        multiplier: 1.2,
+        phase: 'playing'
+      }));
+      
+      setGameState(nextState);
+      setIsSawedOff(false);
+      setShotEffect(null);
+      rewardClaimedRef.current = false; // Reset reward claim flag for new game
+    } catch (error) {
+      console.error('Error starting game:', error);
+      if (error.code === 4001) {
+        setTelemetry("Transaction rejected by user.");
+      } else if (error.reason) {
+        setTelemetry(`Error: ${error.reason}`);
+      } else {
+        setTelemetry("Failed to start game. Please try again.");
+      }
+    } finally {
+      setIsContractLoading(false);
+    }
   };
 
   const handleCashOut = () => {
@@ -960,20 +1043,75 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       nextState.matchOver = true;
       nextState.lastOutcome = 'player';
       telemetry.push("MATCH OVER: You win");
-      // Delay before showing win screen
-      setTimeout(() => {
-        setAimingAt(null);
-        setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
-      }, 1000);
+      
+      // Only claim reward once per game
+      if (!rewardClaimedRef.current) {
+        rewardClaimedRef.current = true;
+        
+        // Delay before showing win screen
+        setTimeout(async () => {
+          setAimingAt(null);
+          setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
+          
+          // Claim win reward from contract
+          if (contractRef.current) {
+            try {
+              setIsContractLoading(true);
+              const tx = await contractRef.current.claimWin();
+              await tx.wait();
+              
+              // Update balance after receiving reward
+              if (providerRef.current) {
+                const balance = await providerRef.current.getBalance(cryptoState.walletAddress);
+                setCryptoState(prev => ({
+                  ...prev,
+                  balance: parseFloat(ethers.formatEther(balance))
+                }));
+              }
+              setTelemetry("Reward claimed: +2 MON");
+            } catch (error) {
+              console.error('Error claiming win:', error);
+              if (error.reason) {
+                setTelemetry(`Error claiming reward: ${error.reason}`);
+              } else {
+                setTelemetry("Failed to claim reward. Please claim manually.");
+              }
+            } finally {
+              setIsContractLoading(false);
+            }
+          }
+        }, 1000);
+      }
     } else if (state.playerHealth <= 0) {
       nextState.matchOver = true;
       nextState.lastOutcome = 'dealer';
       telemetry.push("MATCH OVER: Dealer wins");
-      // Delay before showing loss screen
-      setTimeout(() => {
-        setAimingAt(null);
-        setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
-      }, 1000);
+      
+      // Only end game once
+      if (!rewardClaimedRef.current) {
+        rewardClaimedRef.current = true;
+        
+        // Delay before showing loss screen
+        setTimeout(async () => {
+          setAimingAt(null);
+          setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
+          
+          // End game in contract (no reward)
+          if (contractRef.current) {
+            try {
+              setIsContractLoading(true);
+              const tx = await contractRef.current.endGame();
+              await tx.wait();
+              setTelemetry("Game ended.");
+            } catch (error) {
+              console.error('Error ending game:', error);
+              // Non-critical error, just log it
+            } finally {
+              setIsContractLoading(false);
+            }
+          }
+        }, 1000);
+      }
     }
     return nextState;
   };
@@ -1900,6 +2038,16 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                   <div className="text-center mb-8">
                       <h1 className="text-2xl font-black tracking-[0.2em] text-red-500 mb-2 text-shadow-aberration">ESTABLISH LINK</h1>
                       <div className="text-xs text-zinc-500 uppercase tracking-widest">Initialize Contract</div>
+                      {!contractRef.current && (
+                        <div className="mt-4 p-3 bg-yellow-900/20 border border-yellow-500/50 rounded">
+                          <p className="text-yellow-400 text-xs">Please connect your wallet to initialize the contract.</p>
+                        </div>
+                      )}
+                      {contractRef.current && CONTRACT_CONFIG.address === '0x0000000000000000000000000000000000000000' && (
+                        <div className="mt-4 p-3 bg-yellow-900/20 border border-yellow-500/50 rounded">
+                          <p className="text-yellow-400 text-xs">Contract not configured. Please deploy contract and update CONTRACT_ADDRESS in contractConfig.js</p>
+                        </div>
+                      )}
                   </div>
 
                   <div className="mb-8 p-4 bg-zinc-950 border border-zinc-800 rounded">
@@ -1933,10 +2081,20 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                     </button>
                     <button 
                         onClick={handleStartGame}
-                        className="flex-[2] py-4 bg-red-900/20 border border-red-500/50 hover:bg-red-900/40 hover:border-red-500 text-red-500 font-black tracking-[0.2em] uppercase transition-all duration-300 group"
+                        disabled={isContractLoading || !contractRef.current || !CONTRACT_CONFIG.address || CONTRACT_CONFIG.address === '0x0000000000000000000000000000000000000000'}
+                        className="flex-[2] py-4 bg-red-900/20 border border-red-500/50 hover:bg-red-900/40 hover:border-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-red-500 font-black tracking-[0.2em] uppercase transition-all duration-300 group"
                     >
-                        <span className="group-hover:mr-2 transition-all">Sign Contract</span>
-                        <span className="opacity-0 group-hover:opacity-100 transition-all">_&gt;</span>
+                        {isContractLoading ? (
+                          <span className="flex items-center justify-center gap-2">
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            Processing...
+                          </span>
+                        ) : (
+                          <>
+                            <span className="group-hover:mr-2 transition-all">Sign Contract</span>
+                            <span className="opacity-0 group-hover:opacity-100 transition-all">_&gt;</span>
+                          </>
+                        )}
                     </button>
                   </div>
               </div>
@@ -2050,6 +2208,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                           ...createInitialGameState(rngSeedRef.current),
                           log: ["Session reset.", "Ready."]
                         }));
+                        rewardClaimedRef.current = false; // Reset reward claim flag
                     }}
                     className={`px-8 py-3 bg-black border font-bold tracking-[0.2em] uppercase transition-all ${gameState.lastOutcome === 'player' ? 'text-green-400 border-green-500/50 hover:bg-green-900/20' : 'text-red-500 border-red-500/50 hover:bg-red-900/20'}`}
                   >
@@ -2075,10 +2234,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               <div className="flex items-center gap-1 md:gap-2">
                 <HealthBar health={gameState.playerHealth} />
                 {gameState.tempEffects?.player?.shieldNextDamage > 0 && (
-                  <div className="flex items-center gap-0.5 sm:gap-1 px-1 sm:px-2 py-0.5 sm:py-1 bg-blue-900/30 border border-blue-500/50 rounded text-blue-400 animate-pulse flex-shrink-0">
-                    <Shield className="w-2 h-2 sm:w-2.5 sm:h-2.5 md:w-3 md:h-3" />
-                    <span className="text-[0.45rem] sm:text-[0.5rem] md:text-[0.6rem] font-bold">{gameState.tempEffects.player.shieldNextDamage}</span>
-                  </div>
+                  <div className="w-6 h-7 sm:w-5 sm:h-6 md:w-6 md:h-8 lg:w-8 lg:h-10 border-2 bg-blue-600 border-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.6)] animate-pulse-slow rounded-sm" />
                 )}
               </div>
             </div>
@@ -2090,8 +2246,8 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               <div className="text-xs md:text-sm lg:text-base font-black tracking-[0.2em] md:tracking-[0.3em] lg:tracking-[0.35em] uppercase drop-shadow-[0_0_8px_rgba(220,38,38,0.5)] flex items-center gap-2 md:gap-3">
                 <span className="text-red-500 whitespace-nowrap">Round {gameState.round}</span>
                 <span className="text-zinc-600">•</span>
-                <span className="text-zinc-400 whitespace-nowrap">Rate:</span>
-                <span className="text-white whitespace-nowrap">2x</span>
+                <span className="text-zinc-400 whitespace-nowrap">Reward:</span>
+                <span className="text-white whitespace-nowrap">2 MON</span>
               </div>
               <div className="text-[0.65rem] md:text-xs lg:text-sm text-zinc-300 font-bold flex items-center gap-1.5 md:gap-2">
                 <span className="text-red-400 drop-shadow-[0_0_8px_rgba(220,38,38,0.6)] whitespace-nowrap">LIVE: {gameState.liveShells}</span>
@@ -2112,10 +2268,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               <div className="text-[0.5rem] md:text-[0.6rem] lg:text-[0.65rem] text-red-500 font-bold tracking-tighter mb-0.5 sm:mb-1 text-shadow-aberration truncate">THE_DEALER</div>
               <div className="flex items-center gap-1 md:gap-2 justify-end">
                 {gameState.tempEffects?.dealer?.shieldNextDamage > 0 && (
-                  <div className="flex items-center gap-0.5 sm:gap-1 px-1 sm:px-2 py-0.5 sm:py-1 bg-blue-900/30 border border-blue-500/50 rounded text-blue-400 animate-pulse flex-shrink-0">
-                    <Shield className="w-2 h-2 sm:w-2.5 sm:h-2.5 md:w-3 md:h-3" />
-                    <span className="text-[0.45rem] sm:text-[0.5rem] md:text-[0.6rem] font-bold">{gameState.tempEffects.dealer.shieldNextDamage}</span>
-                  </div>
+                  <div className="w-6 h-7 sm:w-5 sm:h-6 md:w-6 md:h-8 lg:w-8 lg:h-10 border-2 bg-blue-600 border-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.6)] animate-pulse-slow rounded-sm" />
                 )}
                 <HealthBar health={gameState.dealerHealth} side="right" />
               </div>
@@ -2132,10 +2285,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               <div className="flex items-center gap-2">
                 <HealthBar health={gameState.playerHealth} />
                 {gameState.tempEffects?.player?.shieldNextDamage > 0 && (
-                  <div className="flex items-center gap-0.5 px-1 py-0.5 bg-blue-900/30 border border-blue-500/50 rounded text-blue-400 animate-pulse flex-shrink-0">
-                    <Shield className="w-2.5 h-2.5" />
-                    <span className="text-[0.5rem] font-bold">{gameState.tempEffects.player.shieldNextDamage}</span>
-                  </div>
+                  <div className="w-6 h-7 border-2 bg-blue-600 border-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.6)] animate-pulse-slow rounded-sm" />
                 )}
               </div>
             </div>
@@ -2143,10 +2293,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               <div className="text-[0.5rem] text-red-500 font-bold tracking-tighter text-shadow-aberration">THE_DEALER</div>
               <div className="flex items-center gap-2">
                 {gameState.tempEffects?.dealer?.shieldNextDamage > 0 && (
-                  <div className="flex items-center gap-0.5 px-1 py-0.5 bg-blue-900/30 border border-blue-500/50 rounded text-blue-400 animate-pulse flex-shrink-0">
-                    <Shield className="w-2.5 h-2.5" />
-                    <span className="text-[0.5rem] font-bold">{gameState.tempEffects.dealer.shieldNextDamage}</span>
-                  </div>
+                  <div className="w-6 h-7 border-2 bg-blue-600 border-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.6)] animate-pulse-slow rounded-sm" />
                 )}
                 <HealthBar health={gameState.dealerHealth} side="right" />
               </div>
@@ -2158,8 +2305,8 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
             <div className="text-sm font-black tracking-[0.2em] uppercase drop-shadow-[0_0_8px_rgba(220,38,38,0.5)] flex items-center gap-2">
               <span className="text-red-500 whitespace-nowrap">Round {gameState.round}</span>
               <span className="text-zinc-600">•</span>
-              <span className="text-zinc-400 whitespace-nowrap">Rate:</span>
-              <span className="text-white whitespace-nowrap">2x</span>
+              <span className="text-zinc-400 whitespace-nowrap">Reward:</span>
+              <span className="text-white whitespace-nowrap">2 MON</span>
             </div>
             <div className="text-sm text-zinc-300 font-bold flex items-center gap-2">
               <span className="text-red-400 drop-shadow-[0_0_8px_rgba(220,38,38,0.6)] whitespace-nowrap">LIVE: {gameState.liveShells}</span>
