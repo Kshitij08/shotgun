@@ -29,7 +29,9 @@ import {
   Trash2,
   HandMetal,
   RefreshCw,
-  Pill
+  Pill,
+  X,
+  Target
 } from 'lucide-react';
 
 // Custom Saw Icon Component
@@ -329,6 +331,9 @@ const App = () => {
   // --- AUDIO STATE ---
   const [volume, setVolume] = useState(50);
   const [isMuted, setIsMuted] = useState(false);
+  
+  // --- HOW TO PLAY MODAL ---
+  const [showHowToPlay, setShowHowToPlay] = useState(false);
 
   const createInitialGameState = (seed = DEFAULT_SEED) => ({
     round: 0,
@@ -1593,7 +1598,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
              />
              <MenuButton onClick={() => {}} icon={<Swords className="w-5 h-5"/>} label="PvP (Soon)" />
              <MenuButton onClick={() => {}} icon={<Trophy className="w-5 h-5"/>} label="Leaderboard" />
-             <MenuButton onClick={() => {}} icon={<HelpCircle className="w-5 h-5"/>} label="How to Play" />
+             <MenuButton onClick={() => setShowHowToPlay(true)} icon={<HelpCircle className="w-5 h-5"/>} label="How to Play" />
           </div>
 
           {/* Footer Controls */}
@@ -2435,6 +2440,138 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         .text-shadow-glow { text-shadow: 0 0 8px rgba(185,28,28,0.4); }
         .text-shadow-aberration { text-shadow: 1px 0 0 rgba(255,0,0,0.5), -1px 0 0 rgba(0,0,255,0.3); }
       `}</style>
+
+      {/* HOW TO PLAY MODAL */}
+      {showHowToPlay && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="relative max-w-2xl w-full mx-4 max-h-[85vh] overflow-y-auto bg-zinc-900 border border-zinc-700 rounded-lg shadow-[0_0_60px_rgba(220,38,38,0.3)]">
+            {/* Header */}
+            <div className="sticky top-0 bg-zinc-900 border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <HelpCircle className="w-6 h-6 text-red-500" />
+                <h2 className="text-xl font-black tracking-[0.15em] uppercase text-white">How to Play</h2>
+              </div>
+              <button 
+                onClick={() => setShowHowToPlay(false)}
+                className="p-2 hover:bg-zinc-800 rounded-lg transition-colors text-zinc-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="px-6 py-5 space-y-6 text-zinc-300 text-sm leading-relaxed">
+              
+              {/* Overview */}
+              <section>
+                <h3 className="text-red-500 font-bold uppercase tracking-widest text-xs mb-3 flex items-center gap-2">
+                  <Skull className="w-4 h-4" /> Overview
+                </h3>
+                <p>
+                  Shotgun Roulette is a deadly game of chance and strategy. You face off against the Dealer in a 
+                  turn-based duel using a shotgun loaded with a mix of <span className="text-red-400 font-bold">LIVE</span> and <span className="text-zinc-400 font-bold">BLANK</span> rounds.
+                </p>
+              </section>
+
+              {/* Basic Rules */}
+              <section>
+                <h3 className="text-red-500 font-bold uppercase tracking-widest text-xs mb-3 flex items-center gap-2">
+                  <Target className="w-4 h-4" /> Basic Rules
+                </h3>
+                <ul className="space-y-2 list-none">
+                  <li className="flex gap-2">
+                    <span className="text-red-500 flex-shrink-0">▸</span>
+                    <span>Each round, the shotgun is loaded with 2-8 shells (at least 1 live, 1 blank)</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-red-500 flex-shrink-0">▸</span>
+                    <span>On your turn, choose to shoot <strong>yourself</strong> or the <strong>Dealer</strong></span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-red-500 flex-shrink-0">▸</span>
+                    <span><span className="text-red-400 font-bold">LIVE</span> rounds deal 1 damage (2 with Hand Saw)</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-red-500 flex-shrink-0">▸</span>
+                    <span><span className="text-zinc-400 font-bold">BLANK</span> rounds deal no damage</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-red-500 flex-shrink-0">▸</span>
+                    <span>Shooting yourself with a <span className="text-zinc-400 font-bold">BLANK</span> grants you another turn and skips the opponent's next turn!</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-red-500 flex-shrink-0">▸</span>
+                    <span>First to reduce the opponent's HP to 0 wins</span>
+                  </li>
+                </ul>
+              </section>
+
+              {/* Items */}
+              <section>
+                <h3 className="text-red-500 font-bold uppercase tracking-widest text-xs mb-3 flex items-center gap-2">
+                  <Package className="w-4 h-4" /> Items
+                </h3>
+                <p className="mb-3 text-zinc-400">
+                  After each round, both players receive items via the Roulette Wheel. Use them wisely!
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {Object.entries(ITEM_CONFIG).map(([key, item]) => (
+                    <div key={key} className="flex items-center gap-3 p-2 bg-zinc-800/50 rounded border border-zinc-700/50">
+                      <div className="text-red-400 flex-shrink-0">
+                        {React.cloneElement(item.icon, { className: "w-4 h-4" })}
+                      </div>
+                      <div>
+                        <div className="text-white font-bold text-xs">{item.label}</div>
+                        <div className="text-zinc-500 text-[0.65rem]">{item.description}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              {/* Tips */}
+              <section>
+                <h3 className="text-red-500 font-bold uppercase tracking-widest text-xs mb-3 flex items-center gap-2">
+                  <Zap className="w-4 h-4" /> Pro Tips
+                </h3>
+                <ul className="space-y-2 list-none">
+                  <li className="flex gap-2">
+                    <span className="text-yellow-500 flex-shrink-0">★</span>
+                    <span>Use the Magnifying Glass to know the current shell before deciding</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-yellow-500 flex-shrink-0">★</span>
+                    <span>If you know it's a BLANK, shoot yourself to skip the Dealer's turn</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-yellow-500 flex-shrink-0">★</span>
+                    <span>Combine Hand Saw + known LIVE for devastating 2-damage shots</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-yellow-500 flex-shrink-0">★</span>
+                    <span>Use Beer to eject unfavorable shells</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-yellow-500 flex-shrink-0">★</span>
+                    <span>Save the Shield for when you're low on HP</span>
+                  </li>
+                </ul>
+              </section>
+
+            </div>
+
+            {/* Footer */}
+            <div className="sticky bottom-0 bg-zinc-900 border-t border-zinc-800 px-6 py-4">
+              <button 
+                onClick={() => setShowHowToPlay(false)}
+                className="w-full py-3 bg-red-600 hover:bg-red-500 text-white font-bold uppercase tracking-widest text-sm transition-all rounded"
+              >
+                Got it!
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
