@@ -2432,8 +2432,8 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         {/* MIDDLE SECTION: THE SHOTGUN */}
         <div className="flex-1 flex items-center justify-center w-full max-w-3xl relative py-2 sm:py-4 z-20 -mt-10 sm:-mt-20">
       {wheelState.active && (
-        <div className="fixed inset-0 z-[250] bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center pointer-events-auto font-mono">
-            <div className="text-center mb-8 sm:mb-8 animate-in slide-in-from-top-4 px-4">
+        <div className="fixed inset-0 z-[250] bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center pointer-events-auto font-mono pt-24 sm:pt-0">
+            <div className="text-center mb-4 sm:mb-8 mt-12 sm:mt-0 animate-in slide-in-from-top-4 px-4">
             <h2 className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-[0.2em] sm:tracking-[0.3em] uppercase mb-2 text-shadow-aberration">
               {wheelState.currentOwner === 'player' ? "PLAYER DISTRIBUTION" : "DEALER DISTRIBUTION"}
             </h2>
@@ -2445,7 +2445,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
             </div>
           </div>
 
-          <div className="relative w-64 h-64 sm:w-80 sm:h-80 md:w-96 md:h-96 mb-6 sm:mb-12">
+          <div className="relative w-64 h-64 sm:w-80 sm:h-80 md:w-96 md:h-96 mb-4 sm:mb-12">
             <div className="absolute -top-8 left-1/2 -translate-x-1/2 z-30 filter drop-shadow-[0_4px_4px_rgba(0,0,0,0.8)]">
                 <svg width="40" height="60" viewBox="0 0 40 60" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M20 60L5 20H35L20 60Z" fill="#ef4444" stroke="#7f1d1d" strokeWidth="2" />
