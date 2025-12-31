@@ -1,0 +1,7 @@
+{
+  "buildCommand": "cd shotgun-app && npm run build",
+  "outputDirectory": "shotgun-app/dist",
+  "installCommand": "cd shotgun-app && npm install",
+  "framework": "vite"
+}
+
