@@ -2218,6 +2218,17 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           </div>
       )}
 
+      {/* How to Play Button - Bottom Right Corner (Gameplay Only) */}
+      {cryptoState.phase === 'playing' && (
+        <button
+          onClick={() => setShowHowToPlay(true)}
+          className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-[100] w-12 h-12 sm:w-14 sm:h-14 bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700 hover:border-red-500/50 rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(0,0,0,0.5)] hover:shadow-[0_0_25px_rgba(220,38,38,0.4)] transition-all duration-300 group"
+          aria-label="How to Play"
+        >
+          <HelpCircle className="w-6 h-6 sm:w-7 sm:h-7 text-zinc-400 group-hover:text-red-400 transition-colors" />
+        </button>
+      )}
+
       {/* TOP HEADER */}
       <header className="p-2 sm:p-3 md:p-4 lg:p-6 bg-transparent relative z-50 border-b border-red-500/20 overflow-hidden min-w-0">
         {/* Desktop Layout: Original 3-column layout */}
