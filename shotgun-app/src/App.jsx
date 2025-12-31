@@ -1191,7 +1191,6 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
   const isSawAnimating = effectOverlay === 'sawing';
   const isPlayerTurn = cryptoState.phase === 'playing' && gameState.currentTurn === 'player' && !gameState.matchOver && !(playerLockUntil > Date.now()) && !isSawAnimating && !wheelState.active;
-  const isReloading = gameState.chamber.length > 0 && gameState.currentShellIndex >= gameState.chamber.length && !gameState.matchOver;
   const turnLabel = cryptoState.phase === 'playing'
     ? (gameState.currentTurn === 'player' ? 'Your Turn' : 'Dealer Turn')
     : null;
@@ -1949,37 +1948,29 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                </div>
           </div>
 
-          <div className="animate-in fade-in slide-in-from-top-4 duration-1000 mt-6 relative z-10 opacity-90">
+          <div className="animate-in fade-in slide-in-from-top-4 duration-1000 mt-6 relative z-10 opacity-90 flex flex-col items-center">
+            {/* Dealer's Turn/Skip Indicator - fixed height to prevent layout shift */}
+            <div className="h-8 flex items-center justify-center gap-2 mb-1">
+              {turnLabel && gameState.currentTurn === 'dealer' && (
+                <div className="flex items-center gap-2 px-4 py-1 bg-zinc-900/80 border border-red-500/50 text-[0.65rem] font-bold uppercase tracking-[0.2em] rounded-full shadow-[0_0_12px_rgba(248,113,113,0.3)]">
+                  <span className="w-2 h-2 rounded-full bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.8)] animate-pulse" />
+                  <span className="text-red-300">Dealer Turn</span>
+                </div>
+              )}
+              {pendingDealerSkips > 0 && (
+                <div className="flex items-center gap-2 px-3 py-1 bg-yellow-900/30 border border-yellow-500/50 text-[0.6rem] font-bold uppercase tracking-[0.15em] rounded-full shadow-[0_0_10px_rgba(234,179,8,0.2)]">
+                  <SkipForward className="w-3 h-3 text-yellow-400" />
+                  <span className="text-yellow-300">Dealer Skip: {pendingDealerSkips}</span>
+                </div>
+              )}
+            </div>
+            
             {renderInventoryBar(gameState.dealerInventory, "Dealer", 4, null, false)}
           </div>
         </div>
 
         {/* MIDDLE SECTION: THE SHOTGUN */}
         <div className="flex-1 flex items-center justify-center w-full max-w-3xl relative py-4 z-20 -mt-20">
-          {turnLabel && (
-            <div className="absolute -top-14 left-1/2 -translate-x-1/2 flex items-center gap-3 px-4 py-1 bg-zinc-900/80 border border-zinc-700 text-[0.65rem] font-bold uppercase tracking-[0.2em] rounded-full shadow-[0_0_12px_rgba(0,0,0,0.4)]">
-              <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${gameState.currentTurn === 'player' ? 'bg-green-400 shadow-[0_0_6px_rgba(74,222,128,0.8)]' : 'bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.8)]'}`} />
-                <span className={gameState.currentTurn === 'player' ? 'text-green-300' : 'text-red-300'}>
-                  {turnLabel}
-                </span>
-              </div>
-              {(pendingPlayerSkips > 0 || pendingDealerSkips > 0) && (
-                <div className="flex items-center gap-2 text-[0.6rem] text-zinc-300">
-                  {pendingPlayerSkips > 0 && (
-                    <span className="px-2 py-0.5 rounded-full bg-green-900/40 border border-green-500/40 text-green-200">
-                      You skip: {pendingPlayerSkips}
-                    </span>
-                  )}
-                  {pendingDealerSkips > 0 && (
-                    <span className="px-2 py-0.5 rounded-full bg-red-900/40 border border-red-500/40 text-red-200">
-                      Dealer skip: {pendingDealerSkips}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
       {wheelState.active && (
         <div className="fixed inset-0 z-[250] bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center pointer-events-auto font-mono">
             <div className="text-center mb-8 animate-in slide-in-from-top-4">
@@ -2099,10 +2090,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                         onClick={() => spinWheel('player')}
                         className="group relative px-12 py-5 bg-zinc-900 border border-zinc-700 text-zinc-300 text-sm font-black uppercase tracking-[0.25em] hover:border-red-500 hover:text-red-400 transition-all active:scale-95 hover:shadow-[0_0_20px_rgba(220,38,38,0.3)]"
                     >
-                        <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-zinc-900 px-2 text-[0.5rem] text-zinc-500 border border-zinc-800 uppercase tracking-widest">
-                            INPUT_SPIN
-                        </div>
-                        SPIN WHEEL
+                        SPIN
                     </button>
                 )
             )}
@@ -2115,11 +2103,6 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           </div>
         </div>
       )}
-          {isReloading && (
-            <div className="absolute -top-6 left-1/2 -translate-x-1/2 px-3 py-1 bg-red-900/30 border border-red-500/50 text-red-300 text-[0.65rem] font-bold uppercase tracking-[0.2em] rounded shadow-[0_0_12px_rgba(220,38,38,0.4)]">
-              Reloading...
-            </div>
-          )}
           <div className="relative w-full h-40 flex items-center justify-center group cursor-crosshair">
              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3/4 h-24 bg-zinc-800/30 blur-2xl rounded-[100%] transition-all duration-1000" />
              
@@ -2312,6 +2295,22 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                     <div className="text-sm font-bold text-white">{hoveredInventoryItem.type}</div>
                     <div className="text-xs text-zinc-400">{hoveredInventoryItem.description}</div>
                   </div>
+                </div>
+              )}
+            </div>
+
+            {/* Player's Turn/Skip Indicator - fixed height to prevent layout shift */}
+            <div className="h-8 flex items-center justify-center gap-2 mb-1">
+              {turnLabel && gameState.currentTurn === 'player' && (
+                <div className="flex items-center gap-2 px-4 py-1 bg-zinc-900/80 border border-green-500/50 text-[0.65rem] font-bold uppercase tracking-[0.2em] rounded-full shadow-[0_0_12px_rgba(74,222,128,0.3)]">
+                  <span className="w-2 h-2 rounded-full bg-green-400 shadow-[0_0_6px_rgba(74,222,128,0.8)] animate-pulse" />
+                  <span className="text-green-300">Your Turn</span>
+                </div>
+              )}
+              {pendingPlayerSkips > 0 && (
+                <div className="flex items-center gap-2 px-3 py-1 bg-yellow-900/30 border border-yellow-500/50 text-[0.6rem] font-bold uppercase tracking-[0.15em] rounded-full shadow-[0_0_10px_rgba(234,179,8,0.2)]">
+                  <SkipForward className="w-3 h-3 text-yellow-400" />
+                  <span className="text-yellow-300">You Skip: {pendingPlayerSkips}</span>
                 </div>
               )}
             </div>
