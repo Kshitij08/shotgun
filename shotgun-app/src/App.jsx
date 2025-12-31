@@ -325,7 +325,8 @@ const App = () => {
     balance: 1000.0,
     currentWager: 0,
     multiplier: 1.0,
-    phase: 'main_menu'
+    phase: 'main_menu',
+    walletAddress: '0x0000000000000000000000000000000000000000' // Mock address, replace with actual wallet connection
   });
 
   // --- AUDIO STATE ---
@@ -334,6 +335,9 @@ const App = () => {
   
   // --- HOW TO PLAY MODAL ---
   const [showHowToPlay, setShowHowToPlay] = useState(false);
+  
+  // --- PROFILE MODAL ---
+  const [showProfile, setShowProfile] = useState(false);
 
   const createInitialGameState = (seed = DEFAULT_SEED) => ({
     round: 0,
@@ -1609,6 +1613,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
              />
              <MenuButton onClick={() => {}} icon={<Swords className="w-5 h-5"/>} label="PvP (Soon)" />
              <MenuButton onClick={() => {}} icon={<Trophy className="w-5 h-5"/>} label="Leaderboard" />
+             <MenuButton onClick={() => setShowProfile(true)} icon={<User className="w-5 h-5"/>} label="Profile" />
              <MenuButton onClick={() => setShowHowToPlay(true)} icon={<HelpCircle className="w-5 h-5"/>} label="How to Play" />
           </div>
 
@@ -1672,7 +1677,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                           <span className="text-xs text-zinc-400 uppercase tracking-wider">Available Balance</span>
                           <span className="text-sm font-bold text-zinc-200 flex items-center gap-2">
                               <Wallet className="w-4 h-4 text-zinc-500" /> 
-                              {cryptoState.balance.toFixed(2)} ETH
+                              {cryptoState.balance.toFixed(2)} MON
                           </span>
                       </div>
                       
@@ -1680,7 +1685,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                           <span className="text-xs text-red-400 uppercase tracking-wider font-bold">Entry Cost</span>
                           <div className="flex items-baseline gap-1">
                               <span className="text-2xl font-mono text-red-500 font-black tracking-tighter">1.00</span>
-                              <span className="text-xs text-red-400 font-bold">ETH</span>
+                              <span className="text-xs text-red-400 font-bold">MON</span>
                           </div>
                       </div>
                       
@@ -1769,7 +1774,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                   <div className="space-y-4 mb-8">
                       <div className="flex justify-between items-center p-3 border-b border-zinc-800">
                           <span className="text-xs text-zinc-500 uppercase tracking-wider">Initial Wager</span>
-                          <span className="font-mono text-zinc-300">{cryptoState.currentWager.toFixed(2)} ETH</span>
+                          <span className="font-mono text-zinc-300">{cryptoState.currentWager.toFixed(2)} MON</span>
                       </div>
                       <div className="flex justify-between items-center p-3 border-b border-zinc-800">
                           <span className="text-xs text-zinc-500 uppercase tracking-wider">Multiplier</span>
@@ -1778,7 +1783,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                       <div className="flex justify-between items-center p-4 bg-green-900/10 border border-green-500/20 rounded">
                           <span className="text-xs text-green-500 uppercase tracking-wider font-bold">Total Payout</span>
                           <span className="text-xl font-black text-green-400 drop-shadow-[0_0_5px_rgba(34,197,94,0.5)]">
-                              {(cryptoState.currentWager * cryptoState.multiplier).toFixed(2)} ETH
+                              {(cryptoState.currentWager * cryptoState.multiplier).toFixed(2)} MON
                           </span>
                       </div>
                   </div>
@@ -1806,7 +1811,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                     {gameState.lastOutcome === 'player' ? 'YOU WIN' : 'YOU DIED'}
                   </h1>
                   <div className={`${gameState.lastOutcome === 'player' ? 'text-green-300' : 'text-red-300'} font-mono tracking-widest text-sm mb-8`}>
-                      {gameState.lastOutcome === 'player' ? 'Victory: +' : 'LOSS: -'}{gameState.lastOutcome === 'player' ? (cryptoState.currentWager * 2).toFixed(2) : (cryptoState.currentWager).toFixed(2)} ETH
+                      {gameState.lastOutcome === 'player' ? 'Victory: +' : 'LOSS: -'}{gameState.lastOutcome === 'player' ? (cryptoState.currentWager * 2).toFixed(2) : (cryptoState.currentWager).toFixed(2)} MON
                   </div>
                   <button 
                     onClick={() => {
@@ -2513,6 +2518,63 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         .text-shadow-glow { text-shadow: 0 0 8px rgba(185,28,28,0.4); }
         .text-shadow-aberration { text-shadow: 1px 0 0 rgba(255,0,0,0.5), -1px 0 0 rgba(0,0,255,0.3); }
       `}</style>
+
+      {/* PROFILE MODAL */}
+      {showProfile && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="relative max-w-md w-full mx-4 bg-zinc-900 border border-zinc-700 rounded-lg shadow-[0_0_60px_rgba(220,38,38,0.3)]">
+            {/* Header */}
+            <div className="sticky top-0 bg-zinc-900 border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <User className="w-6 h-6 text-red-500" />
+                <h2 className="text-xl font-black tracking-[0.15em] uppercase text-white">Profile</h2>
+              </div>
+              <button 
+                onClick={() => setShowProfile(false)}
+                className="p-2 hover:bg-zinc-800 rounded-lg transition-colors text-zinc-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="px-6 py-6 space-y-6">
+              {/* Wallet Address */}
+              <div className="space-y-2">
+                <label className="text-xs text-zinc-500 uppercase tracking-wider font-bold">Wallet Address</label>
+                <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-lg">
+                  <div className="font-mono text-sm text-zinc-300 break-all">
+                    {cryptoState.walletAddress}
+                  </div>
+                </div>
+              </div>
+
+              {/* MON Balance */}
+              <div className="space-y-2">
+                <label className="text-xs text-zinc-500 uppercase tracking-wider font-bold">MON Balance</label>
+                <div className="p-4 bg-red-900/10 border border-red-500/20 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <Wallet className="w-5 h-5 text-red-500" />
+                    <span className="text-2xl font-mono font-black text-red-500">
+                      {cryptoState.balance.toFixed(2)} MON
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="border-t border-zinc-800 px-6 py-4">
+              <button 
+                onClick={() => setShowProfile(false)}
+                className="w-full py-3 bg-red-600 hover:bg-red-500 text-white font-bold uppercase tracking-widest text-sm transition-all rounded"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* HOW TO PLAY MODAL */}
       {showHowToPlay && (
