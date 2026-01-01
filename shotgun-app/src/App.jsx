@@ -33,7 +33,8 @@ import {
   RefreshCw,
   Pill,
   X,
-  Target
+  Target,
+  Loader2
 } from 'lucide-react';
 
 // Custom Saw Icon Component
@@ -346,6 +347,7 @@ const App = () => {
   const signerRef = useRef(null);
   const contractRef = useRef(null);
   const [isContractLoading, setIsContractLoading] = useState(false);
+  const [entropyStatus, setEntropyStatus] = useState(null); // 'requesting', 'waiting', 'received', null
   const rewardClaimedRef = useRef(false);
 
   // --- CRYPTO / BETTING STATE ---
@@ -667,8 +669,19 @@ const App = () => {
   const rngRef = useRef(mulberry32(DEFAULT_SEED));
 
   const reseed = (seedVal) => {
-    rngSeedRef.current = seedVal >>> 0;
-    rngRef.current = mulberry32(seedVal);
+    // Convert hex string to integer for seeding if necessary
+    let seedInt;
+    if (typeof seedVal === 'string') {
+      // Handle hex strings (with or without 0x prefix)
+      const hexStr = seedVal.startsWith('0x') ? seedVal.slice(2) : seedVal;
+      // Use first 8 hex characters (32 bits) for seeding
+      seedInt = parseInt(hexStr.slice(0, 8), 16);
+    } else {
+      seedInt = seedVal;
+    }
+      
+    rngSeedRef.current = seedInt >>> 0;
+    rngRef.current = mulberry32(seedInt);
   };
 
   const random = () => rngRef.current();
@@ -936,6 +949,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
     return startRoundFromState(state, telemetry);
   };
 
+  // --- UPDATED START GAME FUNCTION FOR PYTH ---
   const handleStartGame = async () => {
     const wager = 1;
     if (wager > cryptoState.balance) {
@@ -943,29 +957,53 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       return;
     }
 
-    // Check if contract is configured
-    if (!contractRef.current) {
-      setTelemetry("CONTRACT NOT INITIALIZED. Please connect your wallet first.");
-      return;
-    }
-    
-    if (!CONTRACT_CONFIG.address || CONTRACT_CONFIG.address === '0x0000000000000000000000000000000000000000') {
-      setTelemetry("CONTRACT NOT CONFIGURED. Please deploy contract and update CONTRACT_ADDRESS.");
+    if (!contractRef.current || !CONTRACT_CONFIG.address) {
+      setTelemetry("CONTRACT NOT INITIALIZED.");
       return;
     }
 
     setIsContractLoading(true);
-    setTelemetry("Initializing contract...");
+    setTelemetry("Initiating Contract & Pyth Entropy...");
 
     try {
-      // Call contract to start game (pays 1 MON)
-      // Note: startGame() will automatically clear any previous active game
+      // 0. Check if contract is funded
+      try {
+        const canStart = await contractRef.current.canStartGame();
+        if (!canStart) {
+          const minBalance = await contractRef.current.getMinRequiredBalance();
+          const minBalanceFormatted = parseFloat(ethers.formatEther(minBalance)).toFixed(2);
+          setTelemetry(`ERROR: Contract needs funding. Send at least ${minBalanceFormatted} MON to contract address: ${CONTRACT_CONFIG.address}`);
+          setIsContractLoading(false);
+          return;
+        }
+      } catch (err) {
+        console.warn("Could not check if contract can start game", err);
+      }
+
+      // 1. Get Entropy Fee
+      let entropyFee = ethers.parseEther("0.001"); // Fallback buffer
+      try {
+        entropyFee = await contractRef.current.getEntropyFee();
+      } catch (err) {
+        if (err.reason && err.reason.includes("Entropy provider not configured")) {
+          setTelemetry("ERROR: Entropy provider not configured. Contract owner must call initializeEntropyProvider() first.");
+          setIsContractLoading(false);
+          return;
+        }
+        console.warn("Could not fetch entropy fee, using fallback", err);
+      }
+
       const playFee = ethers.parseEther("1.0");
-      const tx = await contractRef.current.startGame({ value: playFee });
-      setTelemetry("Transaction sent. Waiting for confirmation...");
+      const totalVal = playFee + entropyFee;
+
+      // 2. Call Start Game
+      const tx = await contractRef.current.startGame({ value: totalVal });
+      setTelemetry("Transaction Sent. Requesting Randomness...");
+      setEntropyStatus('requesting');
       
       await tx.wait();
-      setTelemetry("Game started! Contract initialized.");
+      setTelemetry("Payment Confirmed. Waiting for Pyth...");
+      setEntropyStatus('waiting');
 
       // Update balance after payment
       if (providerRef.current) {
@@ -976,34 +1014,148 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         }));
       }
 
-      // Start the game
-      const seed = Math.floor((Date.now() ^ Math.floor(Math.random() * 1_000_000_000)) >>> 0);
-      reseed(seed);
-      const baseState = createInitialGameState(seed);
-      const nextState = startRoundFromState(baseState, [`MATCH INIT: seed ${seed}`]);
+      // Immediate check - callback might have already completed
+      try {
+        const isPending = await contractRef.current.isGamePending(cryptoState.walletAddress);
+        if (!isPending) {
+          const seed = await contractRef.current.getGameSeed(cryptoState.walletAddress);
+          if (seed && seed !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+            // Callback already completed!
+            reseed(seed);
+            const baseState = createInitialGameState(seed);
+            const nextState = startRoundFromState(baseState, [`SECURE LINK ESTABLISHED: ${seed.slice(0, 10)}...`]);
 
-      setCryptoState(prev => ({
-        ...prev,
-        currentWager: wager,
-        multiplier: 1.2,
-        phase: 'playing'
-      }));
+            setCryptoState(prev => ({
+              ...prev,
+              currentWager: wager,
+              multiplier: 1.2,
+              phase: 'playing'
+            }));
+            
+            setGameState(nextState);
+            setIsSawedOff(false);
+            setShotEffect(null);
+            rewardClaimedRef.current = false;
+            setIsContractLoading(false);
+            setEntropyStatus('received');
+            return; // Exit early, game already started
+          }
+        }
+      } catch (e) {
+        console.warn("Error checking immediate game status:", e);
+      }
+
+      // 3. Listen for GameReady Event and poll for game status
+      const filter = contractRef.current.filters.GameReady(cryptoState.walletAddress);
+      let cleanupDone = false;
       
-      setGameState(nextState);
-      setIsSawedOff(false);
-      setShotEffect(null);
-      rewardClaimedRef.current = false; // Reset reward claim flag for new game
+      // Declare variables that will be used in closures
+      let pollInterval;
+      let timeoutId;
+      
+      // Helper function to start the game with seed
+      const startGameWithSeed = (seed) => {
+        if (cleanupDone) return;
+        cleanupDone = true;
+        console.log("Entropy Received! Seed:", seed);
+        
+        // Clean up listener and interval
+        if (pollInterval) clearInterval(pollInterval);
+        if (timeoutId) clearTimeout(timeoutId);
+        contractRef.current.off(filter, onGameReady);
+        
+        // Start Game with Secure Seed
+        reseed(seed);
+        const baseState = createInitialGameState(seed);
+        const nextState = startRoundFromState(baseState, [`SECURE LINK ESTABLISHED: ${seed.slice(0, 10)}...`]);
+
+        setCryptoState(prev => ({
+          ...prev,
+          currentWager: wager,
+          multiplier: 1.2,
+          phase: 'playing'
+        }));
+        
+        setGameState(nextState);
+        setIsSawedOff(false);
+        setShotEffect(null);
+        rewardClaimedRef.current = false;
+        setIsContractLoading(false);
+        setEntropyStatus('received');
+      };
+
+      // Event listener function
+      const onGameReady = (player, seed) => {
+        if (player.toLowerCase() === cryptoState.walletAddress.toLowerCase() && !cleanupDone) {
+          startGameWithSeed(seed);
+        }
+      };
+
+      // Set up event listener
+      contractRef.current.on(filter, onGameReady);
+
+      // Polling to check if game is ready (more reliable than events)
+      pollInterval = setInterval(async () => {
+        if (cleanupDone) return;
+        try {
+          // Check if game is no longer pending (entropy callback received)
+          const isPending = await contractRef.current.isGamePending(cryptoState.walletAddress);
+          if (!isPending) {
+            // Game is ready, get the seed directly from contract
+            const seed = await contractRef.current.getGameSeed(cryptoState.walletAddress);
+            if (seed && seed !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+              // Clean up and start game
+              startGameWithSeed(seed);
+            }
+          }
+        } catch(e) {
+          console.warn("Error polling game status:", e);
+        }
+      }, 2000);
+
+      // Also listen for past events (in case we missed it)
+      try {
+        const pastEvents = await contractRef.current.queryFilter(
+          filter,
+          tx.blockNumber - 10, // Check last 10 blocks
+          'latest'
+        );
+        if (pastEvents.length > 0) {
+          const latestEvent = pastEvents[pastEvents.length - 1];
+          if (latestEvent.args && latestEvent.args[0].toLowerCase() === cryptoState.walletAddress.toLowerCase()) {
+            startGameWithSeed(latestEvent.args[1]); // seed is the second argument
+            return; // Exit early
+          }
+        }
+      } catch (e) {
+        console.warn("Error querying past events:", e);
+      }
+
+      // Cleanup timeout (if Pyth fails to callback in 90s)
+      timeoutId = setTimeout(() => {
+        if (!cleanupDone) {
+          cleanupDone = true;
+          if (pollInterval) clearInterval(pollInterval);
+          contractRef.current.off(filter, onGameReady);
+          setTelemetry("Entropy timeout. The callback may have succeeded - check Pyth explorer. You can try refreshing.");
+          setIsContractLoading(false);
+          setEntropyStatus(null);
+        }
+      }, 90000); // Increased to 90s since Pyth can take time
+
     } catch (error) {
       console.error('Error starting game:', error);
-      if (error.code === 4001) {
-        setTelemetry("Transaction rejected by user.");
-      } else if (error.reason) {
-        setTelemetry(`Error: ${error.reason}`);
+      
+      // Check for specific error messages
+      const errorMessage = error.reason || error.message || "Failed to start game.";
+      if (errorMessage.includes("Entropy provider not configured")) {
+        setTelemetry("ERROR: Entropy provider not configured. Contract owner must call initializeEntropyProvider() in Remix or via MetaMask.");
       } else {
-        setTelemetry("Failed to start game. Please try again.");
+        setTelemetry(errorMessage);
       }
-    } finally {
+      
       setIsContractLoading(false);
+      setEntropyStatus(null);
     }
   };
 
@@ -1214,13 +1366,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
       const color = isLive ? 'red' : 'white';
       triggerShell(target === 'dealer' ? 'dealer' : 'self', color);
-      // Only show damage effect if damage was actually dealt (not blocked by shield)
-      // When dealer shoots player, show 'self' effect; when player shoots dealer, show 'dealer' effect
-      if (isLive && damage > 0) {
-        setShotEffect(target === 'dealer' ? 'dealer' : 'self');
-      } else {
-        setShotEffect(null);
-      }
+      setShotEffect(isLive ? (target === 'dealer' ? 'dealer' : 'self') : null);
       setTimeout(() => {
         setShotEffect(null);
         setAimingAt(null);
@@ -1738,53 +1884,33 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
     }
 
     // ===== SHOOTING DECISIONS =====
-    // Core principle: Maximize survival by considering probability
-    // When pLive > 0.5: shooting player is safer (high chance to damage opponent, low chance to waste blank)
-    // When pLive < 0.5: shooting self can be strategic (low chance of self-damage, high chance to get skip)
-    
-    // High live odds (>= 60%): Always shoot player to maximize damage output
-    if (pLive >= 0.6) {
+    // High live odds: shoot player (aggressive)
+    if (pLive >= 0.7) {
       aimAndShoot('player');
       return;
     }
 
-    // Low live odds (<= 30%): Shoot self to earn skip turn advantage
+    // Low live odds: shoot self to earn skip (defensive)
     if (pLive <= 0.3) {
       aimAndShoot('dealer');
       return;
     }
 
-    // Medium-high odds (0.5 < pLive < 0.6): Favor shooting player for survival
-    if (pLive > 0.5) {
-      // Even if dealer is low HP, shooting player is safer when pLive > 0.5
-      // Only exception: if dealer is at 1 HP and has no escape, but we already handled that above
-      aimAndShoot('player');
-      return;
-    }
-
-    // Medium-low odds (0.3 < pLive <= 0.5): Strategic decision based on HP and situation
-    // If we have HP advantage, be aggressive
+    // Mid odds (0.3 < pLive < 0.7): Strategic decision
+    // If we have HP advantage, be more aggressive
     if (hpAdvantage > 0) {
       aimAndShoot('player');
       return;
     }
-    
-    // If player has advantage or equal HP
+    // If player has advantage or equal, be more defensive
     if (hpAdvantage <= 0) {
-      // When pLive is close to 0.5, shooting self for skip can be valuable
-      // But if dealer is low HP, we need to be careful - only shoot self if pLive is low enough
-      if (isDealerLow && pLive <= 0.4) {
-        // Safe enough to shoot self for skip advantage
+      // If dealer is low, shoot self to get skip
+      if (isDealerLow) {
         aimAndShoot('dealer');
         return;
       }
-      // If dealer is low but pLive > 0.4, shooting player is safer
-      if (isDealerLow && pLive > 0.4) {
-        aimAndShoot('player');
-        return;
-      }
-      // Otherwise, slight bias toward player (55/45) when odds are close
-      if (random() < 0.55) {
+      // Otherwise, slight bias toward player (60/40)
+      if (random() < 0.6) {
         aimAndShoot('player');
       } else {
         aimAndShoot('dealer');
@@ -2130,8 +2256,10 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                     >
                         {isContractLoading ? (
                           <span className="flex items-center justify-center gap-2">
-                            <RefreshCw className="w-4 h-4 animate-spin" />
-                            Processing...
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            {entropyStatus === 'requesting' ? 'Requesting...' : 
+                             entropyStatus === 'waiting' ? 'Waiting for Pyth...' : 
+                             'Processing...'}
                           </span>
                         ) : (
                           <>
