@@ -1214,7 +1214,13 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
       const color = isLive ? 'red' : 'white';
       triggerShell(target === 'dealer' ? 'dealer' : 'self', color);
-      setShotEffect(isLive ? (target === 'dealer' ? 'dealer' : 'self') : null);
+      // Only show damage effect if damage was actually dealt (not blocked by shield)
+      // When dealer shoots player, show 'self' effect; when player shoots dealer, show 'dealer' effect
+      if (isLive && damage > 0) {
+        setShotEffect(target === 'dealer' ? 'dealer' : 'self');
+      } else {
+        setShotEffect(null);
+      }
       setTimeout(() => {
         setShotEffect(null);
         setAimingAt(null);
@@ -1732,33 +1738,53 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
     }
 
     // ===== SHOOTING DECISIONS =====
-    // High live odds: shoot player (aggressive)
-    if (pLive >= 0.7) {
+    // Core principle: Maximize survival by considering probability
+    // When pLive > 0.5: shooting player is safer (high chance to damage opponent, low chance to waste blank)
+    // When pLive < 0.5: shooting self can be strategic (low chance of self-damage, high chance to get skip)
+    
+    // High live odds (>= 60%): Always shoot player to maximize damage output
+    if (pLive >= 0.6) {
       aimAndShoot('player');
       return;
     }
 
-    // Low live odds: shoot self to earn skip (defensive)
+    // Low live odds (<= 30%): Shoot self to earn skip turn advantage
     if (pLive <= 0.3) {
       aimAndShoot('dealer');
       return;
     }
 
-    // Mid odds (0.3 < pLive < 0.7): Strategic decision
-    // If we have HP advantage, be more aggressive
+    // Medium-high odds (0.5 < pLive < 0.6): Favor shooting player for survival
+    if (pLive > 0.5) {
+      // Even if dealer is low HP, shooting player is safer when pLive > 0.5
+      // Only exception: if dealer is at 1 HP and has no escape, but we already handled that above
+      aimAndShoot('player');
+      return;
+    }
+
+    // Medium-low odds (0.3 < pLive <= 0.5): Strategic decision based on HP and situation
+    // If we have HP advantage, be aggressive
     if (hpAdvantage > 0) {
       aimAndShoot('player');
       return;
     }
-    // If player has advantage or equal, be more defensive
+    
+    // If player has advantage or equal HP
     if (hpAdvantage <= 0) {
-      // If dealer is low, shoot self to get skip
-      if (isDealerLow) {
+      // When pLive is close to 0.5, shooting self for skip can be valuable
+      // But if dealer is low HP, we need to be careful - only shoot self if pLive is low enough
+      if (isDealerLow && pLive <= 0.4) {
+        // Safe enough to shoot self for skip advantage
         aimAndShoot('dealer');
         return;
       }
-      // Otherwise, slight bias toward player (60/40)
-      if (random() < 0.6) {
+      // If dealer is low but pLive > 0.4, shooting player is safer
+      if (isDealerLow && pLive > 0.4) {
+        aimAndShoot('player');
+        return;
+      }
+      // Otherwise, slight bias toward player (55/45) when odds are close
+      if (random() < 0.55) {
         aimAndShoot('player');
       } else {
         aimAndShoot('dealer');
