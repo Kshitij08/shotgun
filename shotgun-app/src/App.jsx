@@ -2150,7 +2150,6 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                primary 
              />
              <MenuButton onClick={() => {}} icon={<Swords className="w-5 h-5"/>} label="PvP (Soon)" />
-             <MenuButton onClick={() => {}} icon={<Trophy className="w-5 h-5"/>} label="Leaderboard" />
              <MenuButton onClick={() => setShowProfile(true)} icon={<User className="w-5 h-5"/>} label="Profile" />
              <MenuButton onClick={() => setShowHowToPlay(true)} icon={<HelpCircle className="w-5 h-5"/>} label="How to Play" />
           </div>
