@@ -837,16 +837,27 @@ const App = () => {
       const nextOwner = newQueue.length > 0 ? newQueue[0] : null;
       const willContinue = newQueue.length > 0;
       
-        console.log('[SPIN] Complete. newQueue:', newQueue, 'nextOwner:', nextOwner, 'willContinue:', willContinue);
-        
-        // Keep pool unchanged for visual consistency - don't remove items during wheel session
-        // This prevents the wheel from re-rendering with fewer/differently-positioned segments
-        
-        // If player just spun and next owner is dealer, immediately set turn to dealer
-        // This prevents player from sneaking a turn after wheel disappears
-        if (owner === 'player' && nextOwner === 'dealer') {
+      console.log('[SPIN] Complete. newQueue:', newQueue, 'nextOwner:', nextOwner, 'willContinue:', willContinue);
+      
+      // Set turn immediately based on game logic BEFORE wheel becomes inactive
+      // This prevents player from interacting during the gap
+      if (!willContinue) {
+        // All spins done - set turn to startTurnForRound immediately
+        setGameState(prev => {
+          if (!prev.matchOver) {
+            return {
+              ...prev,
+              currentTurn: startTurnForRound
+            };
+          }
+          return prev;
+        });
+      } else {
+        // More spins remaining - if next owner is dealer, set turn to dealer immediately
+        // If next owner is player, keep turn as player (they'll spin again)
+        if (nextOwner === 'dealer') {
           setGameState(prev => {
-            if (prev.currentTurn === 'player' && !prev.matchOver) {
+            if (!prev.matchOver) {
               return {
                 ...prev,
                 currentTurn: 'dealer'
@@ -854,37 +865,34 @@ const App = () => {
             }
             return prev;
           });
+        } else if (nextOwner === 'player') {
+          setGameState(prev => {
+            if (!prev.matchOver && prev.currentTurn !== 'player') {
+              return {
+                ...prev,
+                currentTurn: 'player'
+              };
+            }
+            return prev;
+          });
         }
-        
-        // Update state to show the acquired item
-        setWheelState(prev => ({
-          ...prev,
-          spinning: false,
-          lastItem: selectedKind,
-          // Pool stays the same for visual consistency
-          queue: newQueue,
-          currentOwner: nextOwner,
-          active: willContinue
-        }));
+      }
+      
+      // Update state to show the acquired item
+      setWheelState(prev => ({
+        ...prev,
+        spinning: false,
+        lastItem: selectedKind,
+        // Pool stays the same for visual consistency
+        queue: newQueue,
+        currentOwner: nextOwner,
+        active: willContinue
+      }));
       
       // After showing the item briefly (1.5s), either continue to next spin or start round
       setTimeout(() => {
         // Release spin lock
         spinLockRef.current = false;
-        
-        // If player just spun and next owner is dealer, immediately set turn to dealer
-        // This prevents player from sneaking a turn after wheel disappears
-        if (owner === 'player' && nextOwner === 'dealer') {
-          setGameState(prev => {
-            if (prev.currentTurn === 'player' && !prev.matchOver) {
-              return {
-                ...prev,
-                currentTurn: 'dealer'
-              };
-            }
-            return prev;
-          });
-        }
         
         setWheelState(prev => ({
           ...prev,
@@ -892,12 +900,14 @@ const App = () => {
         }));
         
         // Check if we should continue spinning or start the next round
-        // The useEffect will handle triggering the dealer spin if needed
+        // The turn has already been set above, so we just need to start the round if all spins are done
         if (!willContinue) {
           console.log('[SPIN] All spins done, starting next round');
+          // Turn is already set to startTurnForRound above, just start the round
           setGameState(prevGame => startRoundFromState(prevGame, [], startTurnForRound));
         } else {
           console.log('[SPIN] More spins to go, nextOwner:', nextOwner);
+          // Turn is already set above based on nextOwner
         }
       }, 1500);
     }, 4000);
@@ -1248,11 +1258,12 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       if (!rewardClaimedRef.current) {
         rewardClaimedRef.current = true;
         
-        // Delay before showing win screen
-        setTimeout(async () => {
-          setAimingAt(null);
-          setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
-          
+        // Show game over screen immediately
+        setAimingAt(null);
+        setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
+        
+        // Fetch RNG data and claim reward in background (async, no delay)
+        (async () => {
           // Claim win reward from contract (requires server signature)
           if (!contractRef.current) {
             setTelemetry("Error: Contract not connected");
@@ -1396,7 +1407,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           } else {
             setTelemetry("Error: Game ID not found. Cannot claim reward.");
           }
-        }, 1000);
+        })();
       }
     } else if (state.playerHealth <= 0) {
       nextState.matchOver = true;
@@ -1407,11 +1418,12 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       if (!rewardClaimedRef.current) {
         rewardClaimedRef.current = true;
         
-        // Delay before showing loss screen
-        setTimeout(async () => {
-          setAimingAt(null);
-          setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
-          
+        // Show game over screen immediately
+        setAimingAt(null);
+        setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
+        
+        // Fetch RNG verification data in background (async, no delay)
+        (async () => {
           // Fetch RNG verification data (even on loss)
           if (gameIdRef.current) {
             try {
@@ -1466,7 +1478,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           
           // No need to call endGame() - contract will auto-clear on next startGame()
           setTelemetry("Game ended. You can start a new game when ready.");
-        }, 1000);
+        })();
       }
     }
     return nextState;
@@ -2206,6 +2218,31 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
   // --- UI COMPONENTS ---
 
+  // Animated Loading Text Component (for Pyth loading)
+  const AnimatedLoadingText = ({ status }) => {
+    const [dots, setDots] = useState('.');
+    
+    useEffect(() => {
+      if (!status || status === 'received') return;
+      
+      const interval = setInterval(() => {
+        setDots(prev => {
+          if (prev === '.') return '..';
+          if (prev === '..') return '...';
+          return '.';
+        });
+      }, 500); // Change every 500ms
+      
+      return () => clearInterval(interval);
+    }, [status]);
+    
+    const baseText = status === 'requesting' ? 'Requesting' : 
+                     status === 'waiting' ? 'Waiting for Pyth' : 
+                     'Processing';
+    
+    return <span>{baseText}{dots}</span>;
+  };
+
   // Main Menu Button Component
   const MenuButton = ({ onClick, icon, label, primary }) => (
     <button 
@@ -2468,7 +2505,12 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                   <div className="flex gap-4">
                     <button 
                         onClick={() => setCryptoState(p => ({...p, phase: 'main_menu'}))}
-                        className="flex-1 py-4 bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-400 font-bold tracking-[0.2em] uppercase transition-all duration-300 text-xs"
+                        disabled={entropyStatus === 'requesting' || entropyStatus === 'waiting'}
+                        className={`flex-1 py-4 bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-400 font-bold tracking-[0.2em] uppercase transition-all duration-300 text-xs ${
+                          (entropyStatus === 'requesting' || entropyStatus === 'waiting') 
+                            ? 'opacity-50 cursor-not-allowed' 
+                            : ''
+                        }`}
                     >
                         Back
                     </button>
@@ -2478,12 +2520,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                         className="flex-[2] py-4 bg-red-900/20 border border-red-500/50 hover:bg-red-900/40 hover:border-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-red-500 font-black tracking-[0.2em] uppercase transition-all duration-300 group"
                     >
                         {isContractLoading ? (
-                          <span className="flex items-center justify-center gap-2">
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            {entropyStatus === 'requesting' ? 'Requesting...' : 
-                             entropyStatus === 'waiting' ? 'Waiting for Pyth...' : 
-                             'Processing...'}
-                          </span>
+                          <AnimatedLoadingText status={entropyStatus} />
                         ) : (
                           <>
                             <span className="group-hover:mr-2 transition-all">Sign Contract</span>
@@ -2599,21 +2636,34 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                   
                   {/* Buttons Container */}
                   <div className="flex items-center justify-center gap-4">
-                    {/* RNG Verification Button */}
-                    {rngVerificationData && (
-                      <button
-                        onClick={() => setShowRNGVerification(true)}
-                        className="group relative px-8 py-4 border transition-all duration-300 overflow-hidden bg-zinc-900 border-zinc-800 hover:border-red-500/50 hover:bg-zinc-800"
-                      >
-                        <div className="absolute inset-0 transition-opacity duration-300 bg-red-500/0 group-hover:bg-red-500/5" />
-                        <div className="flex items-center justify-center gap-3 relative z-10">
-                          <Search className={`w-5 h-5 transition-colors text-zinc-500 group-hover:text-red-400`} />
-                          <span className="font-black tracking-[0.2em] uppercase transition-colors text-zinc-400 group-hover:text-zinc-200">
-                            Verify RNG
-                          </span>
-                        </div>
-                      </button>
-                    )}
+                    {/* RNG Verification Button - Always shown, disabled until data is fetched */}
+                    <button
+                      onClick={() => rngVerificationData && setShowRNGVerification(true)}
+                      disabled={!rngVerificationData}
+                      className={`group relative px-8 py-4 border transition-all duration-300 overflow-hidden ${
+                        rngVerificationData 
+                          ? 'bg-zinc-900 border-zinc-800 hover:border-red-500/50 hover:bg-zinc-800 cursor-pointer' 
+                          : 'bg-zinc-950 border-zinc-900 opacity-50 cursor-not-allowed'
+                      }`}
+                    >
+                      <div className={`absolute inset-0 transition-opacity duration-300 ${
+                        rngVerificationData ? 'bg-red-500/0 group-hover:bg-red-500/5' : ''
+                      }`} />
+                      <div className="flex items-center justify-center gap-3 relative z-10">
+                        <Search className={`w-5 h-5 transition-colors ${
+                          rngVerificationData 
+                            ? 'text-zinc-500 group-hover:text-red-400' 
+                            : 'text-zinc-700'
+                        }`} />
+                        <span className={`font-black tracking-[0.2em] uppercase transition-colors ${
+                          rngVerificationData 
+                            ? 'text-zinc-400 group-hover:text-zinc-200' 
+                            : 'text-zinc-600'
+                        }`}>
+                          {rngVerificationData ? 'Verify RNG' : 'Loading RNG...'}
+                        </span>
+                      </div>
+                    </button>
                     
                     <button 
                       onClick={() => {
