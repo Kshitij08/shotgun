@@ -7,5 +7,8 @@ variable-setup/
 # Documentation files in root directory only
 /*.md
 
+# MD files folder
+md files/
+
 # Keep README files in subdirectories (they're not ignored)
 

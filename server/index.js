@@ -305,8 +305,8 @@ app.post('/api/game/verify-and-sign', async (req, res) => {
     await pool.query(
       `INSERT INTO game_claims 
        (game_id, player_address, final_player_health, final_dealer_health, rng_commitment, end_block, signature, claimed_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [gameId, playerAddress.toLowerCase(), finalPlayerHealth, finalDealerHealth, game.rng_commitment, endBlockNumber, signature, Date.now()]
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+      [gameId, playerAddress.toLowerCase(), finalPlayerHealth, finalDealerHealth, game.rng_commitment, endBlockNumber, signature]
     );
     
     res.json({
