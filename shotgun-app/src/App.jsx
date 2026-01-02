@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
-import { CONTRACT_CONFIG, SHOTGUN_ROULETTE_ABI } from './contractConfig';
+import { CONTRACT_CONFIG, SHOTGUN_ROULETTE_ABI, SERVER_URL } from './contractConfig';
 import { 
   Skull, 
   User,
@@ -349,6 +349,7 @@ const App = () => {
   const [isContractLoading, setIsContractLoading] = useState(false);
   const [entropyStatus, setEntropyStatus] = useState(null); // 'requesting', 'waiting', 'received', null
   const rewardClaimedRef = useRef(false);
+  const gameIdRef = useRef(null); // Store gameId from server
 
   // --- CRYPTO / BETTING STATE ---
   const [cryptoState, setCryptoState] = useState({
@@ -1018,7 +1019,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       try {
         const isPending = await contractRef.current.isGamePending(cryptoState.walletAddress);
         if (!isPending) {
-          const seed = await contractRef.current.getGameSeed(cryptoState.walletAddress);
+          const seed = await contractRef.current.getBaseSeed(cryptoState.walletAddress);
           if (seed && seed !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
             // Callback already completed!
             reseed(seed);
@@ -1054,7 +1055,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       let timeoutId;
       
       // Helper function to start the game with seed
-      const startGameWithSeed = (seed) => {
+      const startGameWithSeed = async (seed) => {
         if (cleanupDone) return;
         cleanupDone = true;
         console.log("Entropy Received! Seed:", seed);
@@ -1068,6 +1069,29 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         reseed(seed);
         const baseState = createInitialGameState(seed);
         const nextState = startRoundFromState(baseState, [`SECURE LINK ESTABLISHED: ${seed.slice(0, 10)}...`]);
+
+        // Register game with server to get gameId
+        try {
+          const serverResponse = await fetch(`${SERVER_URL}/api/game/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              playerAddress: cryptoState.walletAddress,
+              baseSeed: seed
+            })
+          });
+          
+          if (serverResponse.ok) {
+            const serverData = await serverResponse.json();
+            gameIdRef.current = serverData.gameId;
+            console.log('Game registered with server. GameId:', serverData.gameId);
+          } else {
+            console.warn('Failed to register game with server:', await serverResponse.text());
+          }
+        } catch (error) {
+          console.warn('Error registering game with server:', error);
+          // Continue anyway - server registration is for claim verification
+        }
 
         setCryptoState(prev => ({
           ...prev,
@@ -1102,7 +1126,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           const isPending = await contractRef.current.isGamePending(cryptoState.walletAddress);
           if (!isPending) {
             // Game is ready, get the seed directly from contract
-            const seed = await contractRef.current.getGameSeed(cryptoState.walletAddress);
+            const seed = await contractRef.current.getBaseSeed(cryptoState.walletAddress);
             if (seed && seed !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
               // Clean up and start game
               startGameWithSeed(seed);
@@ -1198,11 +1222,96 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           setAimingAt(null);
           setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
           
-          // Claim win reward from contract
-          if (contractRef.current) {
+          // Claim win reward from contract (requires server signature)
+          if (!contractRef.current) {
+            setTelemetry("Error: Contract not connected");
+            setIsContractLoading(false);
+            return;
+          }
+          
+          // If gameId is missing, try to get baseSeed and register with server
+          if (!gameIdRef.current) {
+            try {
+              setTelemetry("Registering game with server...");
+              const baseSeed = await contractRef.current.getBaseSeed(cryptoState.walletAddress);
+              if (baseSeed && baseSeed !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+                const serverResponse = await fetch(`${SERVER_URL}/api/game/start`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    playerAddress: cryptoState.walletAddress,
+                    baseSeed: baseSeed
+                  })
+                });
+                
+                if (serverResponse.ok) {
+                  const serverData = await serverResponse.json();
+                  gameIdRef.current = serverData.gameId;
+                  console.log('Game registered with server. GameId:', serverData.gameId);
+                } else {
+                  throw new Error('Failed to register game with server');
+                }
+              } else {
+                throw new Error('No active game found');
+              }
+            } catch (error) {
+              console.error('Error registering game:', error);
+              setTelemetry("Error: Game not registered with server. Cannot claim reward.");
+              setIsContractLoading(false);
+              return;
+            }
+          }
+          
+          if (contractRef.current && gameIdRef.current) {
             try {
               setIsContractLoading(true);
-              const tx = await contractRef.current.claimWin();
+              setTelemetry("Requesting server signature...");
+              
+              // First, end the game on server to get end block
+              const endResponse = await fetch(`${SERVER_URL}/api/game/end`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  playerAddress: cryptoState.walletAddress,
+                  gameId: gameIdRef.current
+                })
+              });
+              
+              if (!endResponse.ok) {
+                throw new Error('Failed to end game on server');
+              }
+              
+              const endData = await endResponse.json();
+              
+              // Get signature from server
+              const signResponse = await fetch(`${SERVER_URL}/api/game/verify-and-sign`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  playerAddress: cryptoState.walletAddress,
+                  gameId: gameIdRef.current,
+                  finalPlayerHealth: state.playerHealth,
+                  finalDealerHealth: state.dealerHealth
+                })
+              });
+              
+              if (!signResponse.ok) {
+                const errorData = await signResponse.json();
+                throw new Error(errorData.error || 'Failed to get server signature');
+              }
+              
+              const signData = await signResponse.json();
+              
+              // Now claim on contract with signature
+              setTelemetry("Claiming reward on-chain...");
+              const tx = await contractRef.current.claimWin(
+                state.playerHealth,
+                state.dealerHealth,
+                signData.result.rngCommitment, // RNG commitment (used as gameSeed for signature verification)
+                endData.endBlockNumber,
+                signData.signature
+              );
+              
               await tx.wait();
               
               // Update balance after receiving reward
@@ -1214,16 +1323,21 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                 }));
               }
               setTelemetry("Reward claimed: +2 MON");
+              gameIdRef.current = null; // Clear gameId
             } catch (error) {
               console.error('Error claiming win:', error);
-              if (error.reason) {
+              if (error.message) {
+                setTelemetry(`Error: ${error.message}`);
+              } else if (error.reason) {
                 setTelemetry(`Error claiming reward: ${error.reason}`);
               } else {
-                setTelemetry("Failed to claim reward. Please claim manually.");
+                setTelemetry("Failed to claim reward. Please try again.");
               }
             } finally {
               setIsContractLoading(false);
             }
+          } else {
+            setTelemetry("Error: Game ID not found. Cannot claim reward.");
           }
         }, 1000);
       }
