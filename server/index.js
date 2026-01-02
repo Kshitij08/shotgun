@@ -203,27 +203,31 @@ app.post('/api/game/end', async (req, res) => {
       return res.status(400).json({ error: 'Missing playerAddress or gameId' });
     }
     
-    // Get game from database
+    // Get game from database (allow 'active' or 'ended' status)
     const result = await pool.query(
       `SELECT * FROM games 
-       WHERE game_id = $1 AND player_address = $2 AND status = 'active'`,
+       WHERE game_id = $1 AND player_address = $2 AND (status = 'active' OR status = 'ended')`,
       [gameId, playerAddress.toLowerCase()]
     );
     
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Game not found or already ended' });
+      return res.status(404).json({ error: 'Game not found' });
     }
     
     const game = result.rows[0];
     
-    // Get end block number
-    const endBlockNumber = await provider.getBlockNumber();
-    
-    // Update game status
-    await pool.query(
-      `UPDATE games SET status = 'ended', end_block = $1, end_timestamp = $2 WHERE game_id = $3`,
-      [endBlockNumber, Date.now(), gameId]
-    );
+    // Get end block number (use existing if game already ended)
+    let endBlockNumber = game.end_block;
+    if (!endBlockNumber) {
+      endBlockNumber = await provider.getBlockNumber();
+      // Update game status only if not already ended
+      if (game.status === 'active') {
+        await pool.query(
+          `UPDATE games SET status = 'ended', end_block = $1, end_timestamp = $2 WHERE game_id = $3`,
+          [endBlockNumber, Date.now(), gameId]
+        );
+      }
+    }
     
     // Reveal RNG components
     res.json({

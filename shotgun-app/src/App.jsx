@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
 import { CONTRACT_CONFIG, SHOTGUN_ROULETTE_ABI, SERVER_URL } from './contractConfig';
+import { verifyRNGComponents, formatRNGData, verifyBaseSeed } from './utils/rngVerification';
 import { 
   Skull, 
   User,
@@ -350,6 +351,8 @@ const App = () => {
   const [entropyStatus, setEntropyStatus] = useState(null); // 'requesting', 'waiting', 'received', null
   const rewardClaimedRef = useRef(false);
   const gameIdRef = useRef(null); // Store gameId from server
+  const [rngVerificationData, setRngVerificationData] = useState(null);
+  const [showRNGVerification, setShowRNGVerification] = useState(false);
 
   // --- CRYPTO / BETTING STATE ---
   const [cryptoState, setCryptoState] = useState({
@@ -1267,7 +1270,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               setIsContractLoading(true);
               setTelemetry("Requesting server signature...");
               
-              // First, end the game on server to get end block
+              // End the game on server to get end block and RNG data
               const endResponse = await fetch(`${SERVER_URL}/api/game/end`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1278,10 +1281,36 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               });
               
               if (!endResponse.ok) {
-                throw new Error('Failed to end game on server');
+                const errorData = await endResponse.json().catch(() => ({}));
+                throw new Error(errorData.error || 'Failed to end game on server');
               }
               
               const endData = await endResponse.json();
+              
+              // Store RNG data for verification
+              try {
+                const verification = verifyRNGComponents(endData, cryptoState.walletAddress);
+                
+                // Verify base seed matches contract
+                if (contractRef.current) {
+                  const baseSeedValid = await verifyBaseSeed(
+                    endData.baseSeed,
+                    CONTRACT_CONFIG.address,
+                    cryptoState.walletAddress,
+                    contractRef.current
+                  );
+                  verification.baseSeedValid = baseSeedValid;
+                }
+                
+                setRngVerificationData({
+                  ...endData,
+                  verification,
+                  formatted: formatRNGData(endData)
+                });
+              } catch (error) {
+                console.warn('Error verifying RNG data:', error);
+                // Continue with claim even if verification fails
+              }
               
               // Get signature from server
               const signResponse = await fetch(`${SERVER_URL}/api/game/verify-and-sign`, {
@@ -1351,9 +1380,52 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         rewardClaimedRef.current = true;
         
         // Delay before showing loss screen
-        setTimeout(() => {
+        setTimeout(async () => {
           setAimingAt(null);
           setCryptoState(prev => ({ ...prev, phase: 'game_over' }));
+          
+          // Fetch RNG verification data (even on loss)
+          if (gameIdRef.current) {
+            try {
+              const endResponse = await fetch(`${SERVER_URL}/api/game/end`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  playerAddress: cryptoState.walletAddress,
+                  gameId: gameIdRef.current
+                })
+              });
+              
+              if (endResponse.ok) {
+                const rngData = await endResponse.json();
+                try {
+                  const verification = verifyRNGComponents(rngData, cryptoState.walletAddress);
+                  
+                  // Verify base seed matches contract
+                  if (contractRef.current) {
+                    const baseSeedValid = await verifyBaseSeed(
+                      rngData.baseSeed,
+                      CONTRACT_CONFIG.address,
+                      cryptoState.walletAddress,
+                      contractRef.current
+                    );
+                    verification.baseSeedValid = baseSeedValid;
+                  }
+                  
+                  setRngVerificationData({
+                    ...rngData,
+                    verification,
+                    formatted: formatRNGData(rngData)
+                  });
+                } catch (error) {
+                  console.warn('Error verifying RNG data:', error);
+                }
+              }
+            } catch (error) {
+              console.warn('Error fetching RNG data:', error);
+            }
+          }
+          
           // No need to call endGame() - contract will auto-clear on next startGame()
           setTelemetry("Game ended. You can start a new game when ready.");
         }, 1000);
@@ -2486,6 +2558,18 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                   <div className={`${gameState.lastOutcome === 'player' ? 'text-green-300' : 'text-red-300'} font-mono tracking-widest text-sm mb-8`}>
                       {gameState.lastOutcome === 'player' ? 'Victory: +' : 'LOSS: -'}{gameState.lastOutcome === 'player' ? (cryptoState.currentWager * 2).toFixed(2) : (cryptoState.currentWager).toFixed(2)} MON
                   </div>
+                  
+                  {/* RNG Verification Button */}
+                  {rngVerificationData && (
+                    <button
+                      onClick={() => setShowRNGVerification(true)}
+                      className="mb-4 px-6 py-2 bg-zinc-900/80 border border-zinc-700 text-zinc-300 text-xs font-bold tracking-widest uppercase hover:border-zinc-500 hover:text-white transition-all"
+                    >
+                      <Search className="w-4 h-4 inline mr-2" />
+                      Verify RNG
+                    </button>
+                  )}
+                  
                   <button 
                     onClick={() => {
                         setCryptoState(prev => ({ ...prev, currentWager: 0, phase: 'main_menu', multiplier: 1.0 })); // Reset to main menu
@@ -2494,6 +2578,8 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                           log: ["Session reset.", "Ready."]
                         }));
                         rewardClaimedRef.current = false; // Reset reward claim flag
+                        setRngVerificationData(null); // Clear RNG data
+                        setShowRNGVerification(false);
                     }}
                     className={`px-8 py-3 bg-black border font-bold tracking-[0.2em] uppercase transition-all ${gameState.lastOutcome === 'player' ? 'text-green-400 border-green-500/50 hover:bg-green-900/20' : 'text-red-500 border-red-500/50 hover:bg-red-900/20'}`}
                   >
@@ -2501,6 +2587,150 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                   </button>
               </div>
           </div>
+      )}
+
+      {/* RNG Verification Modal */}
+      {showRNGVerification && rngVerificationData && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/95 backdrop-blur-sm p-4">
+          <div className="relative max-w-2xl w-full bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-zinc-900 border-b border-zinc-700 p-4 flex items-center justify-between">
+              <h2 className="text-xl font-black text-white tracking-tight flex items-center gap-2">
+                <Lock className="w-5 h-5 text-green-400" />
+                RNG Verification
+              </h2>
+              <button
+                onClick={() => setShowRNGVerification(false)}
+                className="text-zinc-400 hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              {/* Verification Status */}
+              <div className={`p-4 rounded-lg border-2 ${
+                rngVerificationData.verification.isValid && rngVerificationData.verification.baseSeedValid
+                  ? 'bg-green-950/30 border-green-500/50'
+                  : 'bg-yellow-950/30 border-yellow-500/50'
+              }`}>
+                <div className="flex items-center gap-2 mb-2">
+                  {rngVerificationData.verification.isValid && rngVerificationData.verification.baseSeedValid ? (
+                    <>
+                      <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                      <span className="text-green-400 font-bold">Verification Passed</span>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" />
+                      <span className="text-yellow-400 font-bold">Partial Verification</span>
+                    </>
+                  )}
+                </div>
+                <p className="text-sm text-zinc-300">
+                  {rngVerificationData.verification.message}
+                </p>
+                {rngVerificationData.verification.baseSeedValid !== undefined && (
+                  <p className="text-xs text-zinc-400 mt-2">
+                    Base Seed Match: {rngVerificationData.verification.baseSeedValid ? '✅ Verified' : '❌ Mismatch'}
+                  </p>
+                )}
+              </div>
+
+              {/* RNG Components */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">RNG Components</h3>
+                
+                <div className="space-y-3">
+                  <div className="bg-zinc-950 p-3 rounded border border-zinc-800">
+                    <div className="text-xs text-zinc-500 mb-1">Base Seed (from Pyth Entropy)</div>
+                    <div className="font-mono text-sm text-zinc-300 break-all">
+                      {rngVerificationData.formatted.baseSeed.full}
+                    </div>
+                    <div className="text-xs text-zinc-500 mt-1">
+                      Short: {rngVerificationData.formatted.baseSeed.short}
+                    </div>
+                  </div>
+
+                  <div className="bg-zinc-950 p-3 rounded border border-zinc-800">
+                    <div className="text-xs text-zinc-500 mb-1">RNG Commitment</div>
+                    <div className="font-mono text-sm text-zinc-300 break-all">
+                      {rngVerificationData.formatted.rngCommitment.full}
+                    </div>
+                    <div className="text-xs text-zinc-500 mt-1">
+                      Short: {rngVerificationData.formatted.rngCommitment.short}
+                    </div>
+                  </div>
+
+                  <div className="bg-zinc-950 p-3 rounded border border-zinc-800">
+                    <div className="text-xs text-zinc-500 mb-1">Server Nonce (revealed after game)</div>
+                    <div className="font-mono text-sm text-zinc-300 break-all">
+                      {rngVerificationData.formatted.serverNonce.full}
+                    </div>
+                    <div className="text-xs text-zinc-500 mt-1">
+                      Short: {rngVerificationData.formatted.serverNonce.short}
+                    </div>
+                  </div>
+
+                  <div className="bg-zinc-950 p-3 rounded border border-zinc-800">
+                    <div className="text-xs text-zinc-500 mb-1">Game Start Time</div>
+                    <div className="text-sm text-zinc-300">
+                      {rngVerificationData.formatted.startTimestamp.readable}
+                    </div>
+                    <div className="text-xs text-zinc-500 mt-1">
+                      {rngVerificationData.formatted.startTimestamp.relative}
+                    </div>
+                  </div>
+
+                  <div className="bg-zinc-950 p-3 rounded border border-zinc-800">
+                    <div className="text-xs text-zinc-500 mb-1">Game ID</div>
+                    <div className="font-mono text-sm text-zinc-300 break-all">
+                      {rngVerificationData.formatted.gameId}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Component Analysis */}
+              {rngVerificationData.verification.analysis && (
+                <div className="space-y-4">
+                  <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Component Analysis</h3>
+                  <div className="bg-zinc-950 p-4 rounded border border-zinc-800 space-y-2">
+                    {Object.entries(rngVerificationData.verification.analysis.components).map(([key, comp]) => (
+                      <div key={key} className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="text-xs text-zinc-400">{comp.description}</div>
+                          <div className="text-sm text-zinc-300 mt-1">
+                            {key === 'timestamp' ? comp.readable : comp.value}
+                          </div>
+                        </div>
+                        <div className={`ml-4 ${comp.isValid ? 'text-green-400' : 'text-red-400'}`}>
+                          {comp.isValid ? '✅' : '❌'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="text-xs text-zinc-500 italic">
+                    {rngVerificationData.verification.analysis.note}
+                  </div>
+                </div>
+              )}
+
+              {/* Note */}
+              <div className="bg-blue-950/20 border border-blue-500/30 p-4 rounded">
+                <div className="flex items-start gap-2">
+                  <Info className="w-4 h-4 text-blue-400 mt-0.5 flex-shrink-0" />
+                  <div className="text-xs text-blue-300">
+                    <p className="font-bold mb-1">About RNG Verification:</p>
+                    <p className="text-blue-400/80">
+                      The RNG commitment is computed using: baseSeed + serverSecret + serverNonce + playerAddress + timestamp.
+                      The server secret is not revealed for security, but you can verify that all other components are valid and consistent.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* How to Play Button - Bottom Right Corner (Gameplay Only) */}
