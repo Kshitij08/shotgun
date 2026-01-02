@@ -230,12 +230,17 @@ app.post('/api/game/end', async (req, res) => {
     }
     
     // Reveal RNG components
+    // Ensure timestamp is a number (PostgreSQL might return BIGINT as string)
+    const startTimestamp = typeof game.start_timestamp === 'string' 
+      ? parseInt(game.start_timestamp, 10) 
+      : Number(game.start_timestamp);
+    
     res.json({
       gameId,
       rngCommitment: game.rng_commitment,
       baseSeed: game.base_seed,
       serverNonce: game.server_nonce,
-      startTimestamp: game.start_timestamp,
+      startTimestamp: startTimestamp,
       endBlockNumber,
       message: 'RNG components revealed. You can now verify the game.'
     });
@@ -360,7 +365,9 @@ app.get('/api/game/state/:gameId', async (req, res) => {
       gameId: game.game_id,
       status: game.status,
       rngCommitment: game.rng_commitment,
-      startTimestamp: game.start_timestamp,
+      startTimestamp: typeof game.start_timestamp === 'string' 
+        ? parseInt(game.start_timestamp, 10) 
+        : Number(game.start_timestamp),
       endBlock: game.end_block
     });
   } catch (error) {

@@ -60,11 +60,28 @@ export function analyzeCommitmentStructure(baseSeed, serverNonce, playerAddress,
       },
       timestamp: {
         value: timestamp,
-        isValid: typeof timestamp === 'number' && timestamp > 0 && !isNaN(timestamp),
+        isValid: (() => {
+          // Convert to number if string
+          const ts = typeof timestamp === 'string' ? parseInt(timestamp, 10) : timestamp;
+          return typeof ts === 'number' && ts > 0 && !isNaN(ts) && isFinite(ts);
+        })(),
         description: 'Game start timestamp (milliseconds)',
-        readable: (timestamp > 0 && !isNaN(timestamp)) 
-          ? new Date(timestamp).toISOString() 
-          : `Invalid timestamp: ${timestamp}`
+        readable: (() => {
+          try {
+            // Convert to number if string
+            const ts = typeof timestamp === 'string' ? parseInt(timestamp, 10) : timestamp;
+            if (typeof ts === 'number' && ts > 0 && !isNaN(ts) && isFinite(ts)) {
+              const date = new Date(ts);
+              // Check if date is valid
+              if (!isNaN(date.getTime()) && date.getTime() > 0) {
+                return date.toISOString();
+              }
+            }
+            return `Invalid timestamp: ${timestamp}`;
+          } catch (error) {
+            return `Invalid timestamp: ${timestamp}`;
+          }
+        })()
       }
     };
     
@@ -96,7 +113,12 @@ export function analyzeCommitmentStructure(baseSeed, serverNonce, playerAddress,
  * @returns {object} - Verification results
  */
 export function verifyRNGComponents(rngData, playerAddress) {
-  const { rngCommitment, baseSeed, serverNonce, startTimestamp } = rngData;
+  // Ensure timestamp is a number (might come as string from server)
+  const startTimestamp = typeof rngData.startTimestamp === 'string' 
+    ? parseInt(rngData.startTimestamp, 10) 
+    : Number(rngData.startTimestamp);
+  
+  const { rngCommitment, baseSeed, serverNonce } = rngData;
   
   const analysis = analyzeCommitmentStructure(
     baseSeed,
@@ -140,8 +162,11 @@ export function verifyRNGComponents(rngData, playerAddress) {
  * @returns {object} - Formatted data
  */
 export function formatRNGData(rngData) {
-  const timestamp = rngData.startTimestamp;
-  const isValidTimestamp = timestamp && typeof timestamp === 'number' && timestamp > 0 && !isNaN(timestamp);
+  // Ensure timestamp is a number (might come as string from server)
+  const timestamp = typeof rngData.startTimestamp === 'string' 
+    ? parseInt(rngData.startTimestamp, 10) 
+    : Number(rngData.startTimestamp);
+  const isValidTimestamp = timestamp && typeof timestamp === 'number' && timestamp > 0 && !isNaN(timestamp) && isFinite(timestamp);
   
   return {
     gameId: rngData.gameId,
