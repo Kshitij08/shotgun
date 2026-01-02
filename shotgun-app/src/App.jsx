@@ -1419,6 +1419,16 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                   });
                 } catch (error) {
                   console.warn('Error verifying RNG data:', error);
+                  // Still set the data even if verification fails
+                  try {
+                    setRngVerificationData({
+                      ...rngData,
+                      verification: { isValid: false, error: error.message },
+                      formatted: formatRNGData(rngData)
+                    });
+                  } catch (formatError) {
+                    console.warn('Error formatting RNG data:', formatError);
+                  }
                 }
               }
             } catch (error) {

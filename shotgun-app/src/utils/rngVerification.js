@@ -140,24 +140,27 @@ export function verifyRNGComponents(rngData, playerAddress) {
  * @returns {object} - Formatted data
  */
 export function formatRNGData(rngData) {
+  const timestamp = rngData.startTimestamp;
+  const isValidTimestamp = timestamp && typeof timestamp === 'number' && timestamp > 0 && !isNaN(timestamp);
+  
   return {
     gameId: rngData.gameId,
     baseSeed: {
       full: rngData.baseSeed,
-      short: `${rngData.baseSeed.slice(0, 10)}...${rngData.baseSeed.slice(-8)}`
+      short: `${rngData.baseSeed?.slice(0, 10) || ''}...${rngData.baseSeed?.slice(-8) || ''}`
     },
     rngCommitment: {
       full: rngData.rngCommitment,
-      short: `${rngData.rngCommitment.slice(0, 10)}...${rngData.rngCommitment.slice(-8)}`
+      short: `${rngData.rngCommitment?.slice(0, 10) || ''}...${rngData.rngCommitment?.slice(-8) || ''}`
     },
     serverNonce: {
       full: rngData.serverNonce,
-      short: `${rngData.serverNonce.slice(0, 10)}...${rngData.serverNonce.slice(-8)}`
+      short: `${rngData.serverNonce?.slice(0, 10) || ''}...${rngData.serverNonce?.slice(-8) || ''}`
     },
     startTimestamp: {
-      raw: rngData.startTimestamp,
-      readable: new Date(rngData.startTimestamp).toLocaleString(),
-      relative: getRelativeTime(rngData.startTimestamp)
+      raw: timestamp,
+      readable: isValidTimestamp ? new Date(timestamp).toLocaleString() : 'Invalid timestamp',
+      relative: isValidTimestamp ? getRelativeTime(timestamp) : 'N/A'
     },
     endBlockNumber: rngData.endBlockNumber
   };
@@ -167,16 +170,24 @@ export function formatRNGData(rngData) {
  * Get relative time string
  */
 function getRelativeTime(timestamp) {
-  const now = Date.now();
-  const diff = now - timestamp;
-  const seconds = Math.floor(diff / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
+  if (!timestamp || typeof timestamp !== 'number' || timestamp <= 0 || isNaN(timestamp)) {
+    return 'Invalid timestamp';
+  }
   
-  if (days > 0) return `${days} day${days > 1 ? 's' : ''} ago`;
-  if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
-  if (minutes > 0) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
-  return `${seconds} second${seconds !== 1 ? 's' : ''} ago`;
+  try {
+    const now = Date.now();
+    const diff = now - timestamp;
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    
+    if (days > 0) return `${days} day${days > 1 ? 's' : ''} ago`;
+    if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+    if (minutes > 0) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
+    return `${seconds} second${seconds !== 1 ? 's' : ''} ago`;
+  } catch (error) {
+    return 'Invalid timestamp';
+  }
 }
 
