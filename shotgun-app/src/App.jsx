@@ -842,6 +842,20 @@ const App = () => {
         // Keep pool unchanged for visual consistency - don't remove items during wheel session
         // This prevents the wheel from re-rendering with fewer/differently-positioned segments
         
+        // If player just spun and next owner is dealer, immediately set turn to dealer
+        // This prevents player from sneaking a turn after wheel disappears
+        if (owner === 'player' && nextOwner === 'dealer') {
+          setGameState(prev => {
+            if (prev.currentTurn === 'player' && !prev.matchOver) {
+              return {
+                ...prev,
+                currentTurn: 'dealer'
+              };
+            }
+            return prev;
+          });
+        }
+        
         // Update state to show the acquired item
         setWheelState(prev => ({
           ...prev,
@@ -857,6 +871,20 @@ const App = () => {
       setTimeout(() => {
         // Release spin lock
         spinLockRef.current = false;
+        
+        // If player just spun and next owner is dealer, immediately set turn to dealer
+        // This prevents player from sneaking a turn after wheel disappears
+        if (owner === 'player' && nextOwner === 'dealer') {
+          setGameState(prev => {
+            if (prev.currentTurn === 'player' && !prev.matchOver) {
+              return {
+                ...prev,
+                currentTurn: 'dealer'
+              };
+            }
+            return prev;
+          });
+        }
         
         setWheelState(prev => ({
           ...prev,
