@@ -2448,10 +2448,18 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
              {/* Social Links */}
              <div className="flex gap-6">
-                <button className="hover:text-[#5865F2] hover:scale-110 transition-all duration-200">
+                <button 
+                  onClick={() => window.open('https://discord.gg/B9W64gZjQG', '_blank', 'noopener,noreferrer')}
+                  className="hover:text-[#5865F2] hover:scale-110 transition-all duration-200"
+                  aria-label="Discord"
+                >
                   <DiscordIcon className="w-6 h-6" />
                 </button>
-                <button className="hover:text-white hover:scale-110 transition-all duration-200">
+                <button 
+                  onClick={() => window.open('https://x.com/KshitijGajapure', '_blank', 'noopener,noreferrer')}
+                  className="hover:text-white hover:scale-110 transition-all duration-200"
+                  aria-label="Twitter"
+                >
                   <XIcon className="w-6 h-6" />
                 </button>
              </div>
