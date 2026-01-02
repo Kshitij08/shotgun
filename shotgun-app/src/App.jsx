@@ -2569,32 +2569,45 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                       {gameState.lastOutcome === 'player' ? 'Victory: +' : 'LOSS: -'}{gameState.lastOutcome === 'player' ? (cryptoState.currentWager * 2).toFixed(2) : (cryptoState.currentWager).toFixed(2)} MON
                   </div>
                   
-                  {/* RNG Verification Button */}
-                  {rngVerificationData && (
-                    <button
-                      onClick={() => setShowRNGVerification(true)}
-                      className="mb-4 px-6 py-2 bg-zinc-900/80 border border-zinc-700 text-zinc-300 text-xs font-bold tracking-widest uppercase hover:border-zinc-500 hover:text-white transition-all"
+                  {/* Buttons Container */}
+                  <div className="flex items-center justify-center gap-4">
+                    {/* RNG Verification Button */}
+                    {rngVerificationData && (
+                      <button
+                        onClick={() => setShowRNGVerification(true)}
+                        className="group relative px-8 py-4 border transition-all duration-300 overflow-hidden bg-zinc-900 border-zinc-800 hover:border-red-500/50 hover:bg-zinc-800"
+                      >
+                        <div className="absolute inset-0 transition-opacity duration-300 bg-red-500/0 group-hover:bg-red-500/5" />
+                        <div className="flex items-center justify-center gap-3 relative z-10">
+                          <Search className={`w-5 h-5 transition-colors text-zinc-500 group-hover:text-red-400`} />
+                          <span className="font-black tracking-[0.2em] uppercase transition-colors text-zinc-400 group-hover:text-zinc-200">
+                            Verify RNG
+                          </span>
+                        </div>
+                      </button>
+                    )}
+                    
+                    <button 
+                      onClick={() => {
+                          setCryptoState(prev => ({ ...prev, currentWager: 0, phase: 'main_menu', multiplier: 1.0 })); // Reset to main menu
+                          setGameState(prev => ({
+                            ...createInitialGameState(rngSeedRef.current),
+                            log: ["Session reset.", "Ready."]
+                          }));
+                          rewardClaimedRef.current = false; // Reset reward claim flag
+                          setRngVerificationData(null); // Clear RNG data
+                          setShowRNGVerification(false);
+                      }}
+                      className="group relative px-8 py-4 border transition-all duration-300 overflow-hidden bg-zinc-900 border-zinc-800 hover:border-red-500/50 hover:bg-zinc-800"
                     >
-                      <Search className="w-4 h-4 inline mr-2" />
-                      Verify RNG
+                      <div className="absolute inset-0 transition-opacity duration-300 bg-red-500/0 group-hover:bg-red-500/5" />
+                      <div className="flex items-center justify-center gap-3 relative z-10">
+                        <span className="font-black tracking-[0.2em] uppercase transition-colors text-zinc-400 group-hover:text-zinc-200">
+                          Re-Initialize
+                        </span>
+                      </div>
                     </button>
-                  )}
-                  
-                  <button 
-                    onClick={() => {
-                        setCryptoState(prev => ({ ...prev, currentWager: 0, phase: 'main_menu', multiplier: 1.0 })); // Reset to main menu
-                        setGameState(prev => ({
-                          ...createInitialGameState(rngSeedRef.current),
-                          log: ["Session reset.", "Ready."]
-                        }));
-                        rewardClaimedRef.current = false; // Reset reward claim flag
-                        setRngVerificationData(null); // Clear RNG data
-                        setShowRNGVerification(false);
-                    }}
-                    className={`px-8 py-3 bg-black border font-bold tracking-[0.2em] uppercase transition-all ${gameState.lastOutcome === 'player' ? 'text-green-400 border-green-500/50 hover:bg-green-900/20' : 'text-red-500 border-red-500/50 hover:bg-red-900/20'}`}
-                  >
-                      Re-Initialize
-                  </button>
+                  </div>
               </div>
           </div>
       )}
