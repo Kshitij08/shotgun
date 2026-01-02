@@ -6,6 +6,22 @@
 ✅ You have a GitHub account  
 ✅ Your server code is in a GitHub repository
 
+## Repository Structure
+
+Your monorepo structure:
+```
+shotgun/
+├── contracts/          # Smart contracts
+├── server/            # Backend server (Railway deploys this)
+│   ├── index.js
+│   ├── package.json
+│   ├── db/
+│   │   └── schema.sql
+│   └── ...
+├── shotgun-app/       # Frontend app
+└── ...
+```
+
 ---
 
 ## Step 1: Set Up Database
@@ -22,16 +38,32 @@
 
 1. In your database dashboard, go to **"Variables"** tab
 2. Copy the `DATABASE_URL` value
-3. You'll need this later!
+3. **Note**: Railway automatically provides `DATABASE_URL` to your services - you don't need to manually add it!
 
 ### 1.3 Run Database Schema
 
-1. Click on your database
-2. Go to **"Data"** tab
-3. Click **"Query"**
-4. Copy and paste the contents of `server-example/db/schema.sql`
-5. Click **"Run"**
-6. ✅ Database tables created!
+Railway's Data tab doesn't have a Query button. Use one of these methods:
+
+**Option A: Quick Node.js Script (Easiest)**
+1. Navigate to `db-populate` folder: `cd db-populate`
+2. Install dependencies: `npm install`
+3. Get `DATABASE_URL` from Railway: Database → Variables → DATABASE_URL
+4. Set it: `$env:DATABASE_URL="postgresql://..."` (PowerShell) or `export DATABASE_URL="postgresql://..."` (macOS/Linux)
+5. Run: `node run-schema.js`
+
+**Option B: Railway CLI**
+```bash
+railway connect postgres < server/db/schema.sql
+```
+
+**Option C: Database Client (DBeaver, pgAdmin, TablePlus)**
+1. Get connection details from Railway Connect button
+2. Connect with your database client
+3. Run SQL from `server/db/schema.sql`
+
+**See `RAILWAY_DATABASE_SETUP.md` for detailed instructions.**
+
+✅ After running, verify tables `games` and `game_claims` were created!
 
 ---
 
@@ -40,14 +72,31 @@
 ### 2.1 Connect GitHub Repository
 
 1. In Railway dashboard, click **"New"** → **"GitHub Repo"**
-2. Select your repository
-3. Railway will detect it's a Node.js project
+2. Select your repository (`shotgun`)
+3. Railway will create a service
 
-### 2.2 Configure Build Settings
+### 2.2 Set Root Directory (IMPORTANT for Monorepo!)
 
-Railway should auto-detect, but verify:
+Since your repo has multiple folders, you need to tell Railway which folder contains the server:
+
+1. Go to your service (the one you just created)
+2. Click **"Settings"** tab
+3. Scroll down to **"Root Directory"**
+4. Set it to: `server`
+5. Click **"Save"**
+
+✅ Now Railway will:
+- Look for `package.json` in the `server/` folder
+- Run `npm install` in that folder
+- Run `npm start` in that folder
+
+### 2.3 Configure Build Settings
+
+Railway should auto-detect from `server/package.json`:
 - **Build Command**: `npm install` (auto-detected)
 - **Start Command**: `npm start` (auto-detected)
+
+Verify these are correct in **Settings** → **Deploy** section.
 
 ### 2.3 Set Environment Variables
 
@@ -305,10 +354,17 @@ Railway shows:
 
 ### Important Files
 
-- `server-example/index.js` - Main server file
-- `server-example/db/schema.sql` - Database schema
-- `server-example/package.json` - Dependencies
-- `.env` - Environment variables (not in git!)
+- `server/index.js` - Main server file
+- `server/db/schema.sql` - Database schema
+- `server/package.json` - Dependencies
+- `server/.env` - Environment variables (not in git!)
+
+### Monorepo Notes
+
+- **Root Directory**: Set to `server` in Railway settings
+- **Database**: Created separately in Railway
+- **Frontend**: `shotgun-app/` is separate (not deployed to Railway)
+- **Contracts**: `contracts/` are deployed separately with Hardhat
 
 ### Support
 

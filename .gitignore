@@ -1,0 +1,8 @@
+# Database populate scripts (temporary, contains sensitive data)
+db-populate/
+
+# Documentation files in root directory only
+/*.md
+
+# Keep README files in subdirectories (they're not ignored)
+
