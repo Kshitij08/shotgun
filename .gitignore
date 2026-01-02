@@ -1,6 +1,9 @@
 # Database populate scripts (temporary, contains sensitive data)
 db-populate/
 
+# Variable setup scripts (may contain sensitive data)
+variable-setup/
+
 # Documentation files in root directory only
 /*.md
 
