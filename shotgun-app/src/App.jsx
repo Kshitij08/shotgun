@@ -2044,18 +2044,19 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         scheduleDealerTurnDelay();
         return;
       }
-      // If we know it's live and can't heal, try to invert it to blank and shoot self
-      if (knownShell === 'LIVE' && hasItem('INVERTER') && useItem('INVERTER')) {
-        scheduleDealerTurnDelay();
+      // If we know it's live and can't heal, shoot player instead of using inverter
+      if (knownShell === 'LIVE') {
+        // If known live and no escape, use Shield as last resort
+        if (hasItem('SHIELD') && useItem('SHIELD')) {
+          scheduleDealerTurnDelay();
+          return;
+        }
+        // Otherwise, shoot player with live shell
+        aimAndShoot('player');
         return;
       }
       // If unknown but high live odds, use Beer to eject dangerous shell
       if (!knownShell && pLive > 0.6 && useItem('BEER')) {
-        scheduleDealerTurnDelay();
-        return;
-      }
-      // If known live and no escape, use Shield as last resort
-      if (knownShell === 'LIVE' && hasItem('SHIELD') && useItem('SHIELD')) {
         scheduleDealerTurnDelay();
         return;
       }
@@ -2081,11 +2082,6 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
     // Known live: offensive play
     if (knownShell === 'LIVE') {
-      // If dealer is low HP, try to invert to blank and shoot self for skip
-      if (isDealerCritical && hasItem('INVERTER') && useItem('INVERTER')) {
-        scheduleDealerTurnDelay();
-        return;
-      }
       // If we can kill player (2 HP or less), use Hand Saw for double damage
       if (canKillPlayer && hasItem('HAND_SAW') && useItem('HAND_SAW')) {
         scheduleDealerTurnDelay();
@@ -2096,7 +2092,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         scheduleDealerTurnDelay();
         return;
       }
-      // Shoot player with live shell
+      // Shoot player with live shell (don't use inverter even if available)
       aimAndShoot('player');
       return;
     }
@@ -2131,32 +2127,32 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
     // Skip: Use when we want to force player to take a risky shot (high live odds)
     // This is better than shooting ourselves when odds are against us
-    if (!knownShell && pLive >= 0.65 && hpAdvantage <= 0 && useItem('SKIP')) {
+    if (!knownShell && pLive >= 0.5 && hpAdvantage <= 0 && useItem('SKIP')) {
       scheduleDealerTurnDelay();
       return;
     }
 
     // Random Pill: Use when low HP and no better options (risky but can help)
-    if (isDealerLow && hasItem('RANDOM_PILL') && !hasItem('CIGARETTES') && random() < 0.5 && useItem('RANDOM_PILL')) {
+    if (isDealerLow && hasItem('RANDOM_PILL') && !hasItem('CIGARETTES') && useItem('RANDOM_PILL')) {
       scheduleDealerTurnDelay();
       return;
     }
 
     // Steal: Only if we have space and player has items (low priority)
-    if (current.playerInventory.length > 0 && current.dealerInventory.length < MAX_INVENTORY && random() < 0.25 && useItem('STEAL')) {
+    if (current.playerInventory.length > 0 && current.dealerInventory.length < MAX_INVENTORY && useItem('STEAL')) {
       scheduleDealerTurnDelay();
       return;
     }
 
     // Shake Down: Disrupt player if they have multiple items
-    if (current.playerInventory.length >= 2 && random() < 0.2 && useItem('SHAKE_DOWN')) {
+    if (current.playerInventory.length >= 2 && useItem('SHAKE_DOWN')) {
       scheduleDealerTurnDelay();
       return;
     }
 
     // ===== SHOOTING DECISIONS =====
-    // High live odds: shoot player (aggressive)
-    if (pLive >= 0.7) {
+    // When live probability >= 50%: shoot player (aggressive)
+    if (pLive >= 0.5) {
       aimAndShoot('player');
       return;
     }
@@ -2167,7 +2163,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       return;
     }
 
-    // Mid odds (0.3 < pLive < 0.7): Strategic decision
+    // Mid odds (0.3 < pLive < 0.5): Strategic decision
     // If we have HP advantage, be more aggressive
     if (hpAdvantage > 0) {
       aimAndShoot('player');
@@ -2175,8 +2171,8 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
     }
     // If player has advantage or equal, be more defensive
     if (hpAdvantage <= 0) {
-      // If dealer is low, shoot self to get skip
-      if (isDealerLow) {
+      // If dealer is at 2 HP or more (not critical), shoot self to get skip
+      if (current.dealerHealth >= 2) {
         aimAndShoot('dealer');
         return;
       }
