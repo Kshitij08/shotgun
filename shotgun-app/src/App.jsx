@@ -1485,6 +1485,31 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
   };
 
   const resolveShot = (shooter, target) => {
+    // Calculate damage info before state update to determine if we should show overlay
+    const currentState = gameStateRef.current || gameState;
+    let showDamageOverlay = false;
+    
+    if (currentState && currentState.chamber && currentState.chamber.length > 0 && 
+        currentState.currentShellIndex < currentState.chamber.length) {
+      const shellType = currentState.chamber[currentState.currentShellIndex];
+      const isLive = shellType === 'LIVE';
+      
+      if (isLive && target === 'player') {
+        let damage = 1;
+        if (currentState.tempEffects?.[shooter]?.doubleDamageNextShot) {
+          damage = 2;
+        }
+        
+        // Account for shield
+        if (damage > 0 && currentState.tempEffects?.[target]?.shieldNextDamage > 0) {
+          const shieldAmount = Math.min(damage, currentState.tempEffects[target].shieldNextDamage);
+          damage -= shieldAmount;
+        }
+        
+        showDamageOverlay = damage > 0;
+      }
+    }
+    
     setGameState(prev => {
       if (cryptoState.phase !== 'playing' || prev.matchOver) return prev;
       if (prev.currentTurn !== shooter) return prev;
@@ -1603,6 +1628,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       const color = isLive ? 'red' : 'white';
       triggerShell(target === 'dealer' ? 'dealer' : 'self', color);
       setShotEffect(isLive ? (target === 'dealer' ? 'dealer' : 'self') : null);
+      
       setTimeout(() => {
         setShotEffect(null);
         setAimingAt(null);
@@ -1613,6 +1639,15 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       }
       return nextState;
     });
+    
+    // Show damage overlay when player takes damage (outside state update to avoid batching issues)
+    // Use a small delay to ensure it runs after React processes the state update
+    if (showDamageOverlay) {
+      setTimeout(() => {
+        setEffectOverlay('damage');
+        setTimeout(() => setEffectOverlay(null), 1000);
+      }, 50);
+    }
   };
 
   const removeItemFromInventory = (inventory, id) => inventory.filter(it => it.id !== id);
