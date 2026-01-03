@@ -2315,8 +2315,13 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
     // Known live: offensive play - ALWAYS shoot player, never use items like Beer
     if (effectiveKnownShell === 'LIVE') {
-      // If we can kill player (2 HP or less), use Hand Saw for double damage
-      if (canKillPlayer && hasItem('HAND_SAW') && useItem('HAND_SAW')) {
+      // If all remaining shells are live and dealer has skip item, use it to skip player's turn
+      if (pLive === 1.0 && hasItem('SKIP') && useItem('SKIP')) {
+        scheduleDealerTurnDelay();
+        return;
+      }
+      // Use Hand Saw when shell is known to be live for double damage
+      if (hasItem('HAND_SAW') && useItem('HAND_SAW')) {
         scheduleDealerTurnDelay();
         return;
       }
