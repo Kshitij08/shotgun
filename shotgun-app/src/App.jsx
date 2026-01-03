@@ -775,16 +775,48 @@ const App = () => {
       return;
     }
     
-    const owner = ownerOverride || currentWheel.currentOwner;
-    if (!owner) {
-      console.log('[SPIN] No owner');
+    // Validate queue - should never have more than 2 entries and no duplicates
+    if (currentWheel.queue.length > 2) {
+      console.error('[SPIN] Invalid queue length! Queue:', currentWheel.queue);
+      spinLockRef.current = false;
+      return;
+    }
+    const uniqueQueue = [...new Set(currentWheel.queue)];
+    if (uniqueQueue.length !== currentWheel.queue.length) {
+      console.error('[SPIN] Duplicate entries in queue! Queue:', currentWheel.queue);
+      spinLockRef.current = false;
       return;
     }
     
-    // Verify the owner matches the expected next in queue
-    if (currentWheel.queue.length > 0 && currentWheel.queue[0] !== owner) {
-      console.log('[SPIN] Owner mismatch! Expected:', currentWheel.queue[0], 'Got:', owner);
-      return;
+    // Determine owner: prioritize queue over currentOwner to avoid stale state issues
+    // When override is provided (e.g., player clicks), use it but verify against queue
+    // When no override, use queue[0] if available, otherwise fall back to currentOwner
+    let owner;
+    if (ownerOverride) {
+      // When override is provided, it must match the queue
+      if (currentWheel.queue.length > 0) {
+        if (currentWheel.queue[0] !== ownerOverride) {
+          console.log('[SPIN] Owner override mismatch! Expected:', currentWheel.queue[0], 'Got:', ownerOverride);
+          spinLockRef.current = false;
+          return;
+        }
+        owner = ownerOverride;
+      } else {
+        // Queue is empty, wheel should be inactive
+        console.log('[SPIN] Cannot spin - queue is empty but wheel is active');
+        spinLockRef.current = false;
+        return;
+      }
+    } else {
+      // No override - use queue[0] if available (most reliable), otherwise currentOwner
+      if (currentWheel.queue.length > 0) {
+        owner = currentWheel.queue[0];
+      } else {
+        // Queue is empty, wheel should be inactive
+        console.log('[SPIN] Cannot spin - queue is empty');
+        spinLockRef.current = false;
+        return;
+      }
     }
     
     const pool = currentWheel.pool.length ? currentWheel.pool : Object.keys(ITEM_CONFIG);
@@ -792,7 +824,7 @@ const App = () => {
     
     // Acquire spin lock
     spinLockRef.current = true;
-    console.log('[SPIN] Starting spin for:', owner, 'queue:', currentWheel.queue);
+    console.log('[SPIN] Starting spin for:', owner, 'queue:', currentWheel.queue, 'currentOwner:', currentWheel.currentOwner, 'ownerOverride:', ownerOverride);
     
     // Calculate spin parameters
     const segmentAngle = 360 / pool.length;
@@ -807,14 +839,19 @@ const App = () => {
     const rotation = base + extraSpins + targetRotation + noise;
     const startTurnForRound = currentWheel.startTurn || 'player';
     
-    // Start the spin immediately
-    setWheelState(prev => ({
-      ...prev,
-      spinning: true,
-      lastItem: null,
-      rotation,
-      currentOwner: owner
-    }));
+    // Start the spin immediately and remove owner from queue to prevent double-spins
+    setWheelState(prev => {
+      // Remove the current spinner from queue immediately to prevent useEffect from triggering again
+      const updatedQueue = prev.queue.length > 0 && prev.queue[0] === owner ? prev.queue.slice(1) : prev.queue;
+      return {
+        ...prev,
+        spinning: true,
+        lastItem: null,
+        rotation,
+        currentOwner: owner,
+        queue: updatedQueue // Update queue immediately to prevent double-spins
+      };
+    });
     
     // After animation finishes (4 seconds), process the result
     setTimeout(() => {
@@ -829,8 +866,9 @@ const App = () => {
         return;
       }
       
-      // Advance the queue - remove the first entry (current spinner)
-      const newQueue = latestWheel.queue.slice(1);
+      // Queue was already updated when spin started (owner removed immediately)
+      // So use the current queue as-is
+      const newQueue = latestWheel.queue;
       const nextOwner = newQueue.length > 0 ? newQueue[0] : null;
       const willContinue = newQueue.length > 0;
       
@@ -876,14 +914,15 @@ const App = () => {
       }
       
       // Update state to show the acquired item
+      // CRITICAL: If all spins are done, immediately deactivate wheel to prevent any further spins
       setWheelState(prev => ({
         ...prev,
         spinning: false,
         lastItem: selectedKind,
         // Pool stays the same for visual consistency
-        queue: newQueue,
-        currentOwner: nextOwner,
-        active: willContinue
+        queue: willContinue ? newQueue : [], // Clear queue when wheel becomes inactive
+        currentOwner: willContinue ? nextOwner : null, // Clear owner when inactive
+        active: willContinue // Immediately set to false if all spins done
       }));
       
       // After showing the item briefly (1.5s), either continue to next spin or start round
@@ -891,15 +930,30 @@ const App = () => {
         // Release spin lock
         spinLockRef.current = false;
         
-        setWheelState(prev => ({
-          ...prev,
-          lastItem: null
-        }));
+        // Only update lastItem if wheel is still active (shouldn't be if willContinue was false)
+        setWheelState(prev => {
+          // Double-check: if wheel is inactive, don't update lastItem (it should already be cleared)
+          if (!prev.active) {
+            return prev; // No update needed, wheel is already inactive
+          }
+          return {
+            ...prev,
+            lastItem: null
+          };
+        });
         
         // Check if we should continue spinning or start the next round
         // The turn has already been set above, so we just need to start the round if all spins are done
         if (!willContinue) {
           console.log('[SPIN] All spins done, starting next round');
+          // Explicitly clear wheel state when all spins are complete (redundant but safe)
+          setWheelState(prev => ({
+            ...prev,
+            active: false,
+            queue: [],
+            currentOwner: null,
+            lastItem: null
+          }));
           // Turn is already set to startTurnForRound above, just start the round
           setGameState(prevGame => startRoundFromState(prevGame, [], startTurnForRound));
         } else {
@@ -1512,7 +1566,54 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       if (prev.currentTurn !== shooter) return prev;
 
     if (!prev.chamber.length || prev.currentShellIndex >= prev.chamber.length) {
-        return handleRoundExhausted(prev);
+        // Round exhausted - use same logic as normal round end with roulette wheel
+        const desiredNext = shooter === 'player' ? 'dealer' : 'player';
+        const { updatedStatus, nextTurn, telemetry: skipTelemetry } = resolveSkips(prev.statusEffects, desiredNext);
+        
+        // Determine who spins first based on the resolved next turn
+        const firstSpinner = nextTurn; // Person who gets the next turn spins first
+        const secondSpinner = firstSpinner === 'player' ? 'dealer' : 'player'; // Other person spins second
+        
+        // Reset status effects for the new round (skips are consumed/reset)
+        let nextState = {
+          ...prev,
+          statusEffects: freshStatus(),
+          currentTurn: nextTurn,
+          log: pushTelemetry(prev.log, [...skipTelemetry, `R${prev.round} END: Reloading...`])
+        };
+        
+        // Prepare wheel spins before starting next round
+        const spinsPerActor = Math.min(1, nextState.itemsPerRound ?? 0);
+        if (spinsPerActor > 0) {
+          const queue = [firstSpinner, secondSpinner];
+          // Validate queue - should have exactly 2 unique entries
+          if (queue.length !== 2 || new Set(queue).size !== 2) {
+            console.error('[WHEEL] Invalid queue initialization! Queue:', queue);
+            return startRoundFromState(nextState, [], nextTurn);
+          }
+          console.log('[WHEEL] Queue built from resolveShot guard:', queue, 'spinsPerActor:', spinsPerActor, 'shooter:', shooter, 'nextTurn:', nextTurn);
+          setTimeout(() => {
+            // Final validation before activating wheel
+            if (queue.length !== 2 || new Set(queue).size !== 2) {
+              console.error('[WHEEL] Invalid queue before activation! Queue:', queue);
+              return startRoundFromState(nextState, [], nextTurn);
+            }
+            setAimingAt(null);
+            setWheelState({
+              active: true,
+              queue,
+              pool: Object.keys(ITEM_CONFIG),
+              spinning: false,
+              rotation: 0,
+              lastItem: null,
+              currentOwner: queue[0] || null,
+              startTurn: nextTurn
+            });
+            spinLockRef.current = false;
+          }, 1000);
+          return nextState;
+        }
+        return startRoundFromState(nextState, [], nextTurn);
       }
 
       const shellType = prev.chamber[prev.currentShellIndex];
@@ -1595,9 +1696,21 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         if (spinsPerActor > 0) {
           // Build queue with exactly 1 spin for each actor
           const queue = [firstSpinner, secondSpinner]; // Exactly 2 entries = 1 per actor
+          // Validate queue - should have exactly 2 unique entries
+          if (queue.length !== 2 || new Set(queue).size !== 2) {
+            console.error('[WHEEL] Invalid queue initialization! Queue:', queue);
+            nextState = startRoundFromState(nextState, [], nextTurn);
+            return nextState;
+          }
           console.log('[WHEEL] Queue built:', queue, 'spinsPerActor:', spinsPerActor, 'shooter:', shooter, 'nextTurn:', nextTurn, 'isLive:', isLive);
           // Delay before showing wheel and reset aim
           setTimeout(() => {
+            // Final validation before activating wheel
+            if (queue.length !== 2 || new Set(queue).size !== 2) {
+              console.error('[WHEEL] Invalid queue before activation! Queue:', queue);
+              nextState = startRoundFromState(nextState, [], nextTurn);
+              return nextState;
+            }
             setAimingAt(null);
             setWheelState({
               active: true,
@@ -1929,9 +2042,56 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       }
 
       if (currentShellIndex >= prev.chamber.length && prev.chamber.length > 0) {
-        nextState.log = pushTelemetry(prev.log, [...telemetry, `R${prev.round} END: Reloading...`]);
-        nextState = startRoundFromState(nextState);
-        nextState.currentTurn = 'player';
+        // Use the same turn resolution logic as normal shots (includes skip handling)
+        const desiredNext = keepTurn ? actor : (actor === 'player' ? 'dealer' : 'player');
+        const { updatedStatus, nextTurn, telemetry: skipTelemetry } = resolveSkips(statusEffects, desiredNext);
+        
+        // Determine who spins first based on the resolved next turn
+        const firstSpinner = nextTurn; // Person who gets the next turn spins first
+        const secondSpinner = firstSpinner === 'player' ? 'dealer' : 'player'; // Other person spins second
+        
+        // Reset status effects for the new round (skips are consumed/reset)
+        nextState.statusEffects = freshStatus();
+        nextState.currentTurn = nextTurn;
+        nextState.log = pushTelemetry(prev.log, [...telemetry, ...skipTelemetry, `R${prev.round} END: Reloading...`]);
+        
+        // Prepare wheel spins before starting next round
+        // Ensure exactly 1 item per actor (player and dealer each get 1 item)
+        const spinsPerActor = Math.min(1, nextState.itemsPerRound ?? 0); // Cap at 1 to ensure only 1 item per actor
+        if (spinsPerActor > 0) {
+          // Build queue with exactly 1 spin for each actor
+          const queue = [firstSpinner, secondSpinner]; // Exactly 2 entries = 1 per actor
+          // Validate queue - should have exactly 2 unique entries
+          if (queue.length !== 2 || new Set(queue).size !== 2) {
+            console.error('[WHEEL] Invalid queue initialization! Queue:', queue);
+            nextState = startRoundFromState(nextState, [], nextTurn);
+            return nextState;
+          }
+          console.log('[WHEEL] Queue built from item use:', queue, 'spinsPerActor:', spinsPerActor, 'actor:', actor, 'nextTurn:', nextTurn);
+          // Delay before showing wheel and reset aim
+          setTimeout(() => {
+            // Final validation before activating wheel
+            if (queue.length !== 2 || new Set(queue).size !== 2) {
+              console.error('[WHEEL] Invalid queue before activation! Queue:', queue);
+              nextState = startRoundFromState(nextState, [], nextTurn);
+              return nextState;
+            }
+            setAimingAt(null);
+            setWheelState({
+              active: true,
+              queue,
+              pool: Object.keys(ITEM_CONFIG),
+              spinning: false,
+              rotation: 0,
+              lastItem: null,
+              currentOwner: queue[0] || null,
+              startTurn: nextTurn
+            });
+            spinLockRef.current = false; // Ensure lock is clear when wheel opens
+          }, 1000);
+          return nextState; // wheel will continue flow after delay
+        }
+        nextState = startRoundFromState(nextState, [], nextTurn);
         return nextState;
       }
 
@@ -1978,13 +2138,87 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
   const dealerTakeTurn = () => {
     const latest = gameStateRef.current || gameState;
+    const currentWheel = wheelStateRef.current;
     if (cryptoState.phase !== 'playing' || latest.matchOver) return;
     if (latest.currentTurn !== 'dealer') return;
-    if (wheelState.active) return;
+    // Use ref to check wheel state to avoid stale closures
+    if (currentWheel && currentWheel.active) {
+      console.log('[DEALER TURN] Blocked - wheel is active');
+      return;
+    }
 
     const remaining = latest.chamber.length - latest.currentShellIndex;
     if (remaining <= 0) {
-      setGameState(prev => handleRoundExhausted(prev));
+      // Round exhausted - use same logic as normal round end with roulette wheel
+      // CRITICAL: Double-check wheel state using ref before creating new wheel
+      const wheelCheck = wheelStateRef.current;
+      if (wheelCheck && wheelCheck.active) {
+        console.log('[DEALER TURN] Blocked - wheel is already active, queue:', wheelCheck.queue);
+        return;
+      }
+      
+      setGameState(prev => {
+        if (prev.matchOver) return prev;
+        // Triple-check wheel state inside setState callback
+        const wheelCheckInside = wheelStateRef.current;
+        if (wheelCheckInside && wheelCheckInside.active) {
+          console.log('[DEALER TURN] Blocked inside setState - wheel is already active, queue:', wheelCheckInside.queue);
+          return prev;
+        }
+        
+        const desiredNext = 'player'; // Dealer's turn is ending, so player goes next
+        const { updatedStatus, nextTurn, telemetry: skipTelemetry } = resolveSkips(prev.statusEffects, desiredNext);
+        
+        // Determine who spins first based on the resolved next turn
+        const firstSpinner = nextTurn;
+        const secondSpinner = firstSpinner === 'player' ? 'dealer' : 'player';
+        
+        // Reset status effects for the new round
+        let nextState = {
+          ...prev,
+          statusEffects: freshStatus(),
+          currentTurn: nextTurn,
+          log: pushTelemetry(prev.log, [...skipTelemetry, `R${prev.round} END: Reloading...`])
+        };
+        
+        // Prepare wheel spins before starting next round
+        const spinsPerActor = Math.min(1, nextState.itemsPerRound ?? 0);
+        if (spinsPerActor > 0) {
+          const queue = [firstSpinner, secondSpinner];
+          // Validate queue - should have exactly 2 unique entries
+          if (queue.length !== 2 || new Set(queue).size !== 2) {
+            console.error('[WHEEL] Invalid queue initialization! Queue:', queue);
+            return startRoundFromState(nextState, [], nextTurn);
+          }
+          console.log('[WHEEL] Queue built from dealerTakeTurn:', queue, 'spinsPerActor:', spinsPerActor, 'nextTurn:', nextTurn);
+          setTimeout(() => {
+            // Final validation before activating wheel - check if wheel is already active
+            const finalWheelCheck = wheelStateRef.current;
+            if (finalWheelCheck && finalWheelCheck.active) {
+              console.log('[WHEEL] Blocked - wheel already active when trying to activate, existing queue:', finalWheelCheck.queue);
+              return;
+            }
+            if (queue.length !== 2 || new Set(queue).size !== 2) {
+              console.error('[WHEEL] Invalid queue before activation! Queue:', queue);
+              return startRoundFromState(nextState, [], nextTurn);
+            }
+            setAimingAt(null);
+            setWheelState({
+              active: true,
+              queue,
+              pool: Object.keys(ITEM_CONFIG),
+              spinning: false,
+              rotation: 0,
+              lastItem: null,
+              currentOwner: queue[0] || null,
+              startTurn: nextTurn
+            });
+            spinLockRef.current = false;
+          }, 1000);
+          return nextState;
+        }
+        return startRoundFromState(nextState, [], nextTurn);
+      });
       return;
     }
 
@@ -2028,6 +2262,8 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
     const current = gameStateRef.current || latest;
     const knownShell = current.knowledge.dealer.currentShellKnown ? current.knowledge.dealer.knownCurrentShellType : null;
     const pLive = remaining > 0 ? current.liveShells / remaining : 0;
+    // If probability is 100% (only live shells left), treat as known live
+    const effectiveKnownShell = knownShell || (pLive === 1.0 ? 'LIVE' : (pLive === 0 ? 'BLANK' : null));
     const hpAdvantage = current.dealerHealth - current.playerHealth;
     const canKillPlayer = current.playerHealth <= 2;
     const isDealerLow = current.dealerHealth <= 2;
@@ -2042,7 +2278,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         return;
       }
       // If we know it's live and can't heal, shoot player instead of using inverter
-      if (knownShell === 'LIVE') {
+      if (effectiveKnownShell === 'LIVE') {
         // If known live and no escape, use Shield as last resort
         if (hasItem('SHIELD') && useItem('SHIELD')) {
           scheduleDealerTurnDelay();
@@ -2053,12 +2289,12 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         return;
       }
       // If unknown but high live odds, use Beer to eject dangerous shell
-      if (!knownShell && pLive > 0.6 && useItem('BEER')) {
+      if (!effectiveKnownShell && pLive > 0.6 && useItem('BEER')) {
         scheduleDealerTurnDelay();
         return;
       }
       // If unknown and high live odds, use Shield
-      if (!knownShell && pLive >= 0.5 && hasItem('SHIELD') && useItem('SHIELD')) {
+      if (!effectiveKnownShell && pLive >= 0.5 && hasItem('SHIELD') && useItem('SHIELD')) {
         scheduleDealerTurnDelay();
         return;
       }
@@ -2066,7 +2302,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
     // ===== KNOWN SHELL LOGIC =====
     // Known blank: ALWAYS shoot self to get skip (blanks don't damage player)
-    if (knownShell === 'BLANK') {
+    if (effectiveKnownShell === 'BLANK') {
       // Exception: If player is at 1 HP and we have Inverter, turn blank into live for kill
       if (current.playerHealth === 1 && hasItem('INVERTER') && useItem('INVERTER')) {
         scheduleDealerTurnDelay();
@@ -2077,8 +2313,8 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       return;
     }
 
-    // Known live: offensive play
-    if (knownShell === 'LIVE') {
+    // Known live: offensive play - ALWAYS shoot player, never use items like Beer
+    if (effectiveKnownShell === 'LIVE') {
       // If we can kill player (2 HP or less), use Hand Saw for double damage
       if (canKillPlayer && hasItem('HAND_SAW') && useItem('HAND_SAW')) {
         scheduleDealerTurnDelay();
@@ -2096,7 +2332,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
     // ===== UNKNOWN SHELL LOGIC =====
     // Use Magnifying Glass when uncertainty is high and decision matters
-    if (!knownShell && remaining > 0) {
+    if (!effectiveKnownShell && remaining > 0) {
       // Use glass if dealer is low and needs to know if safe to shoot self
       if (isDealerLow && pLive > 0.4 && pLive < 0.7 && useItem('MAGNIFYING_GLASS')) {
         scheduleDealerTurnDelay();
@@ -2111,20 +2347,20 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
     // ===== ITEM USAGE PRIORITIES =====
     // Hand Saw: Use when we can secure a kill or significant advantage
-    if (!knownShell && pLive >= 0.65 && canKillPlayer && hasItem('HAND_SAW') && useItem('HAND_SAW')) {
+    if (!effectiveKnownShell && pLive >= 0.65 && canKillPlayer && hasItem('HAND_SAW') && useItem('HAND_SAW')) {
       scheduleDealerTurnDelay();
       return;
     }
 
-    // Beer: Eject dangerous live shells when dealer is low
-    if (!knownShell && pLive > 0.65 && isDealerLow && useItem('BEER')) {
+    // Beer: Eject dangerous live shells when dealer is low (never use if shell is known to be live)
+    if (!effectiveKnownShell && pLive > 0.5 && isDealerLow && useItem('BEER')) {
       scheduleDealerTurnDelay();
       return;
     }
 
     // Skip: Use when we want to force player to take a risky shot (high live odds)
     // This is better than shooting ourselves when odds are against us
-    if (!knownShell && pLive >= 0.5 && hpAdvantage <= 0 && useItem('SKIP')) {
+    if (!effectiveKnownShell && pLive >= 0.5 && hpAdvantage <= 0 && useItem('SKIP')) {
       scheduleDealerTurnDelay();
       return;
     }
@@ -2186,7 +2422,9 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
   useEffect(() => {
     if (cryptoState.phase !== 'playing') return;
     if (gameState.matchOver) return;
-    if (wheelState.active) return;
+    // Use ref to check wheel state to avoid stale closures
+    const currentWheel = wheelStateRef.current;
+    if (currentWheel && currentWheel.active) return;
     if (gameState.currentTurn !== 'dealer') return;
 
     if (gameState.statusEffects.dealer.skipTurnsRemaining > 0) {
@@ -2228,14 +2466,50 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
   ]);
 
   useEffect(() => {
-    if (!wheelState.active) return;
-    if (wheelState.spinning) return;
-    if (wheelState.currentOwner === 'dealer' && !wheelState.lastItem) {
-      console.log('[WHEEL EFFECT] Scheduling dealer spin in 800ms');
-      const t = setTimeout(() => spinWheel('dealer'), 800);
+    // Use ref to get latest state to avoid stale closures
+    const currentWheel = wheelStateRef.current;
+    if (!currentWheel || !currentWheel.active) return;
+    if (currentWheel.spinning) return;
+    // Check spin lock to prevent double-spins
+    if (spinLockRef.current) return;
+    // CRITICAL: If queue is empty, wheel should be inactive - this should never happen, but guard against it
+    if (currentWheel.queue.length === 0) {
+      console.warn('[WHEEL EFFECT] Queue is empty but wheel is active - this should not happen');
+      return;
+    }
+    // Check queue instead of currentOwner to ensure dealer only spins once
+    // Dealer should only auto-spin if they are first in the queue
+    // Also ensure queue has exactly the expected number of entries (should be 1 or 2, never more)
+    if (currentWheel.queue.length > 2) {
+      console.error('[WHEEL EFFECT] Invalid queue length! Queue:', currentWheel.queue);
+      return;
+    }
+    if (currentWheel.queue.length > 0 && currentWheel.queue[0] === 'dealer' && !currentWheel.lastItem) {
+      console.log('[WHEEL EFFECT] Scheduling dealer spin in 800ms, queue:', currentWheel.queue);
+      const t = setTimeout(() => {
+        // Triple-check before spinning - use latest ref state
+        const latestWheel = wheelStateRef.current;
+        if (!latestWheel || !latestWheel.active) {
+          console.log('[WHEEL EFFECT] Dealer spin cancelled - wheel no longer active');
+          return;
+        }
+        if (latestWheel.queue.length === 0) {
+          console.log('[WHEEL EFFECT] Dealer spin cancelled - queue is empty');
+          return;
+        }
+        if (latestWheel.queue.length > 2) {
+          console.error('[WHEEL EFFECT] Dealer spin cancelled - invalid queue length:', latestWheel.queue);
+          return;
+        }
+        if (latestWheel.queue[0] === 'dealer' && !latestWheel.spinning && !spinLockRef.current) {
+          spinWheel('dealer');
+        } else {
+          console.log('[WHEEL EFFECT] Dealer spin cancelled - state changed, queue:', latestWheel?.queue, 'spinning:', latestWheel?.spinning, 'lock:', spinLockRef.current);
+        }
+      }, 800);
       return () => clearTimeout(t);
     }
-  }, [wheelState.active, wheelState.spinning, wheelState.currentOwner, wheelState.lastItem]);
+  }, [wheelState.active, wheelState.spinning, wheelState.queue, wheelState.lastItem]);
 
   // Helper to determine gun transform class
   const getGunContainerClass = () => {
