@@ -573,22 +573,19 @@ const App = () => {
     }
   };
 
-  // Check wallet connection on mount
+  // Check wallet connection on mount - show popup instead of auto-connecting
   useEffect(() => {
-    const init = async () => {
-      const connected = await checkWalletConnection();
-      if (!connected) {
-        setShowWalletModal(true);
-      } else {
-        setShowWalletModal(false);
-        // Set up listeners
-        if (window.ethereum) {
-          window.ethereum.on('accountsChanged', handleAccountsChanged);
-          window.ethereum.on('chainChanged', handleChainChanged);
-        }
+    // Always show connect wallet popup on initial load if not already connected
+    // User must explicitly click connect button - no auto-connection
+    if (!isWalletConnected) {
+      setShowWalletModal(true);
+    } else {
+      // If already connected, set up listeners
+      if (window.ethereum) {
+        window.ethereum.on('accountsChanged', handleAccountsChanged);
+        window.ethereum.on('chainChanged', handleChainChanged);
       }
-    };
-    init();
+    }
 
     return () => {
       if (window.ethereum) {
