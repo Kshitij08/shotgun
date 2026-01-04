@@ -1458,11 +1458,12 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
     // Calculate damage info before state update to determine if we should show overlay
     const currentState = gameStateRef.current || gameState;
     let showDamageOverlay = false;
+    let isLive = false; // Track if shell is live for shot effect
     
     if (currentState && currentState.chamber && currentState.chamber.length > 0 && 
         currentState.currentShellIndex < currentState.chamber.length) {
       const shellType = currentState.chamber[currentState.currentShellIndex];
-      const isLive = shellType === 'LIVE';
+      isLive = shellType === 'LIVE';
       
       if (isLive && target === 'player') {
         let damage = 1;
@@ -1529,7 +1530,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               startTurn: nextTurn
             });
             spinLockRef.current = false;
-          }, 1000);
+          }, 2500); // Increased delay to allow shot effect to complete (2000ms) + buffer
           return nextState;
         }
         return startRoundFromState(nextState, [], nextTurn);
@@ -1642,7 +1643,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               startTurn: nextTurn
             });
             spinLockRef.current = false; // Ensure lock is clear when wheel opens
-          }, 1000);
+          }, 2500); // Increased delay to allow shot effect to complete (2000ms) + buffer
           return nextState; // wheel will continue flow after delay
         }
         nextState = startRoundFromState(nextState, [], nextTurn);
@@ -1656,6 +1657,13 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
       const color = isLive ? 'red' : 'white';
       triggerShell(target === 'dealer' ? 'dealer' : 'self', color);
+      
+      return nextState;
+    });
+    
+    // Set shot effect outside state update to avoid batching issues and ensure it always triggers
+    // Use a small delay to ensure it runs after React processes the state update
+    setTimeout(() => {
       setShotEffect(isLive ? (target === 'dealer' ? 'dealer' : 'self') : null);
       
       setTimeout(() => {
@@ -1663,11 +1671,11 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         setAimingAt(null);
         if (shooter === 'player') setIsSawedOff(false);
       }, 2000);
-      if (shooter === 'dealer') {
-        setPlayerLockUntil(Date.now() + 2000);
-      }
-      return nextState;
-    });
+    }, 50);
+    
+    if (shooter === 'dealer') {
+      setPlayerLockUntil(Date.now() + 2000);
+    }
     
     // Show damage overlay when player takes damage (outside state update to avoid batching issues)
     // Use a small delay to ensure it runs after React processes the state update
@@ -2007,7 +2015,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               startTurn: nextTurn
             });
             spinLockRef.current = false; // Ensure lock is clear when wheel opens
-          }, 1000);
+          }, 2500); // Increased delay to allow shot effect to complete (2000ms) + buffer
           return nextState; // wheel will continue flow after delay
         }
         nextState = startRoundFromState(nextState, [], nextTurn);
@@ -2133,7 +2141,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               startTurn: nextTurn
             });
             spinLockRef.current = false;
-          }, 1000);
+          }, 2500); // Increased delay to allow shot effect to complete (2000ms) + buffer
           return nextState;
         }
         return startRoundFromState(nextState, [], nextTurn);
@@ -2472,19 +2480,24 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
   // Main Menu Button Component
   const MenuButton = ({ onClick, icon, label, primary }) => (
     <button 
-      onClick={onClick}
-      className={`group relative w-full py-4 border transition-all duration-300 overflow-hidden ${
+      onClick={(e) => {
+        e.stopPropagation();
+        if (onClick) onClick(e);
+      }}
+      className={`group relative w-full py-4 border transition-all duration-200 ease-in-out overflow-hidden cursor-pointer ${
         primary 
           ? 'bg-red-900/20 border-red-500/50 hover:bg-red-900/40 hover:border-red-500' 
           : 'bg-zinc-900 border-zinc-800 hover:border-red-500/50 hover:bg-zinc-800'
       }`}
     >
-      <div className={`absolute inset-0 transition-opacity duration-300 ${primary ? 'bg-red-600/10' : 'bg-red-500/0 group-hover:bg-red-500/5'}`} />
+      {!primary && (
+        <div className="absolute inset-0 bg-red-500/0 group-hover:bg-red-500/5 transition-all duration-200 ease-in-out pointer-events-none" />
+      )}
       <div className="flex items-center justify-center gap-4 relative z-10">
-        <span className={`transition-colors ${primary ? 'text-red-500' : 'text-zinc-500 group-hover:text-red-400'}`}>
+        <span className={`transition-colors duration-200 ease-in-out ${primary ? 'text-red-500' : 'text-zinc-500 group-hover:text-red-400'}`}>
           {icon}
         </span>
-        <span className={`font-black tracking-[0.2em] uppercase transition-colors ${primary ? 'text-red-500' : 'text-zinc-400 group-hover:text-zinc-200'}`}>
+        <span className={`font-black tracking-[0.2em] uppercase transition-colors duration-200 ease-in-out ${primary ? 'text-red-500' : 'text-zinc-400 group-hover:text-zinc-200'}`}>
           {label}
         </span>
       </div>
@@ -2623,7 +2636,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
              <div className="w-32 h-1 bg-red-600 mx-auto mt-6 shadow-[0_0_20px_red]" />
           </div>
 
-          <div className="z-10 w-full max-w-sm flex flex-col gap-4 animate-in slide-in-from-bottom-12 duration-1000 delay-200">
+          <div className="z-20 w-full max-w-sm flex flex-col gap-4 animate-in slide-in-from-bottom-12 duration-1000 delay-200 pointer-events-auto">
              <MenuButton 
                onClick={() => {
                  // If wallet is connected, proceed to betting
@@ -2873,7 +2886,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                   </div>
                   
                   {/* Buttons Container */}
-                  <div className="flex items-center justify-center gap-4">
+                  <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
                     {/* RNG Verification Button - Always shown, disabled until data is fetched */}
                     <button
                       onClick={() => rngVerificationData && setShowRNGVerification(true)}
