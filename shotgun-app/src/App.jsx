@@ -341,7 +341,7 @@ const MONAD_CHAIN_ID = 10143;
 
 const App = () => {
   // --- APPKIT HOOKS ---
-  const { open } = useAppKit();
+  const { open, close } = useAppKit();
   const { address, isConnected } = useAppKitAccount();
   const { walletProvider } = useAppKitProvider('eip155'); // 'eip155' for EVM chains
 
@@ -481,45 +481,45 @@ const App = () => {
     open(); // Opens AppKit's built-in wallet selection modal
   };
 
-  // Auto-open wallet modal on mount if not connected
+  // Auto-open wallet modal on mount ONLY if not connected
+  // Also prevent AppKit from showing account view when wallet is already connected
   const hasAttemptedOpen = useRef(false);
+  const connectionCheckTimer = useRef(null);
   
   useEffect(() => {
-    // Wait for AppKit to fully initialize, then check connection status
-    // We check multiple times because connection status might not be immediately available
-    let checkCount = 0;
-    const maxChecks = 10; // Check up to 10 times (2 seconds total)
+    // Clear any existing timer
+    if (connectionCheckTimer.current) {
+      clearTimeout(connectionCheckTimer.current);
+    }
     
-    const checkConnection = () => {
-      checkCount++;
-      
-      // If wallet is connected, don't open
-      if (isConnected && address) {
+    // IMPORTANT: If wallet is already connected, close any open modal and never open it
+    if (isConnected && address) {
+      hasAttemptedOpen.current = true;
+      // Close any modal that might be open (account view, etc.)
+      close();
+      return; // Exit immediately - wallet is connected, don't show anything
+    }
+    
+    // If we've already attempted to open, don't try again
+    if (hasAttemptedOpen.current) {
+      return;
+    }
+    
+    // Wait for AppKit to fully initialize, then check connection status one more time
+    connectionCheckTimer.current = setTimeout(() => {
+      // Final check: only open if wallet is definitely NOT connected
+      if (!isConnected && !address) {
         hasAttemptedOpen.current = true;
-        return;
+        open(); // Only opens connect modal when not connected
       }
-      
-      // If we've checked enough times and still not connected, open the modal
-      if (checkCount >= maxChecks) {
-        if (!hasAttemptedOpen.current) {
-          hasAttemptedOpen.current = true;
-          open();
-        }
-        return;
-      }
-      
-      // Check again after a short delay
-      setTimeout(checkConnection, 200);
-    };
-    
-    // Start checking after initial delay
-    const initialTimer = setTimeout(checkConnection, 300);
+    }, 1000); // Give AppKit time to initialize and check connection
     
     return () => {
-      clearTimeout(initialTimer);
+      if (connectionCheckTimer.current) {
+        clearTimeout(connectionCheckTimer.current);
+      }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only run once on mount
+  }, [isConnected, address, open, close]); // Watch connection status changes
 
   const [hoveredInventoryItem, setHoveredInventoryItem] = useState(null); // For inventory item tooltips
   const hoverTimeoutRef = useRef(null);
