@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
+import { useAppKit, useAppKitAccount, useAppKitProvider } from '@reown/appkit/react';
 import { CONTRACT_CONFIG, SHOTGUN_ROULETTE_ABI, SERVER_URL } from './contractConfig';
 import { verifyRNGComponents, formatRNGData, verifyBaseSeed } from './utils/rngVerification';
 import { 
@@ -339,10 +340,12 @@ const MONAD_TESTNET = {
 const MONAD_CHAIN_ID = 10143;
 
 const App = () => {
+  // --- APPKIT HOOKS ---
+  const { open } = useAppKit();
+  const { address, isConnected } = useAppKitAccount();
+  const { walletProvider } = useAppKitProvider('eip155'); // 'eip155' for EVM chains
+
   // --- WALLET CONNECTION STATE ---
-  const [isWalletConnected, setIsWalletConnected] = useState(false);
-  const [showWalletModal, setShowWalletModal] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
   const [connectionError, setConnectionError] = useState(null);
   const providerRef = useRef(null);
   const signerRef = useRef(null);
@@ -362,6 +365,76 @@ const App = () => {
     phase: 'main_menu',
     walletAddress: '0x0000000000000000000000000000000000000000'
   });
+
+  // Sync AppKit state with local state and initialize ethers provider/contract
+  useEffect(() => {
+    if (isConnected && address && walletProvider) {
+      setCryptoState(prev => ({
+        ...prev,
+        walletAddress: address
+      }));
+      
+      // Initialize ethers provider and contract from AppKit
+      const initEthers = async () => {
+        try {
+          // Create ethers BrowserProvider from AppKit's walletProvider
+          const ethersProvider = new ethers.BrowserProvider(walletProvider);
+          providerRef.current = ethersProvider;
+          const signer = await ethersProvider.getSigner();
+          signerRef.current = signer;
+          
+          // Initialize contract
+          if (CONTRACT_CONFIG.address && CONTRACT_CONFIG.address !== '0x0000000000000000000000000000000000000000') {
+            contractRef.current = new ethers.Contract(
+              CONTRACT_CONFIG.address,
+              SHOTGUN_ROULETTE_ABI,
+              signer
+            );
+          }
+
+          // Update balance
+          const balance = await ethersProvider.getBalance(address);
+          setCryptoState(prev => ({
+            ...prev,
+            balance: parseFloat(ethers.formatEther(balance))
+          }));
+        } catch (error) {
+          console.error('Error initializing ethers provider:', error);
+        }
+      };
+      
+      initEthers();
+    } else {
+      setCryptoState(prev => ({
+        ...prev,
+        walletAddress: '0x0000000000000000000000000000000000000000',
+        balance: 0
+      }));
+      providerRef.current = null;
+      signerRef.current = null;
+      contractRef.current = null;
+    }
+  }, [isConnected, address, walletProvider]);
+
+  // Update balance periodically when connected
+  useEffect(() => {
+    if (!isConnected || !providerRef.current || !address) return;
+
+    const updateBalance = async () => {
+      try {
+        const balance = await providerRef.current.getBalance(address);
+        setCryptoState(prev => ({
+          ...prev,
+          balance: parseFloat(ethers.formatEther(balance))
+        }));
+      } catch (error) {
+        console.error('Error updating balance:', error);
+      }
+    };
+
+    const interval = setInterval(updateBalance, 10000); // Update every 10 seconds
+    return () => clearInterval(interval);
+  }, [isConnected, address]);
 
   // --- AUDIO STATE ---
   const [volume, setVolume] = useState(50);
@@ -400,220 +473,53 @@ const App = () => {
   const [gameState, setGameState] = useState(() => createInitialGameState());
 
   // --- WALLET CONNECTION FUNCTIONS ---
-  const checkWalletConnection = async () => {
-    if (typeof window.ethereum === 'undefined') {
-      return false;
-    }
+  // Using AppKit for wallet connection - it handles everything!
 
-    try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const accounts = await provider.listAccounts();
-      
-      if (accounts.length > 0) {
-        const network = await provider.getNetwork();
-        const chainId = Number(network.chainId);
-        
-        if (chainId === MONAD_CHAIN_ID) {
-          providerRef.current = provider;
-          signerRef.current = await provider.getSigner();
-          
-          // Initialize contract if address is configured
-          if (CONTRACT_CONFIG.address && CONTRACT_CONFIG.address !== '0x0000000000000000000000000000000000000000') {
-            contractRef.current = new ethers.Contract(
-              CONTRACT_CONFIG.address,
-              SHOTGUN_ROULETTE_ABI,
-              signerRef.current
-            );
-          }
-          
-          const address = await signerRef.current.getAddress();
-          const balance = await provider.getBalance(address);
-          
-          setCryptoState(prev => ({
-            ...prev,
-            walletAddress: address,
-            balance: parseFloat(ethers.formatEther(balance))
-          }));
-          setIsWalletConnected(true);
-          return true;
-        } else {
-          // Wrong network
-          return false;
-        }
-      }
-      return false;
-    } catch (error) {
-      console.error('Error checking wallet connection:', error);
-      return false;
-    }
-  };
-
-  const switchToMonadTestnet = async () => {
-    if (typeof window.ethereum === 'undefined') {
-      setConnectionError('Please install MetaMask or another Web3 wallet');
-      return false;
-    }
-
-    try {
-      // Try to switch to Monad testnet
-      await window.ethereum.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: MONAD_TESTNET.chainId }],
-      });
-      return true;
-    } catch (switchError) {
-      // This error code indicates that the chain has not been added to MetaMask
-      if (switchError.code === 4902) {
-        try {
-          // Add the chain
-          await window.ethereum.request({
-            method: 'wallet_addEthereumChain',
-            params: [MONAD_TESTNET],
-          });
-          return true;
-        } catch (addError) {
-          console.error('Error adding Monad testnet:', addError);
-          setConnectionError('Failed to add Monad testnet to wallet');
-          return false;
-        }
-      } else {
-        console.error('Error switching to Monad testnet:', switchError);
-        setConnectionError('Failed to switch to Monad testnet');
-        return false;
-      }
-    }
-  };
-
-  const connectWallet = async () => {
-    if (typeof window.ethereum === 'undefined') {
-      setConnectionError('Please install MetaMask or another Web3 wallet');
-      return;
-    }
-
-    setIsConnecting(true);
+  // Handle wallet connection - AppKit provides the modal
+  const handleConnect = () => {
     setConnectionError(null);
+    open(); // Opens AppKit's built-in wallet selection modal
+  };
 
-    try {
-      // First, switch to Monad testnet
-      const switched = await switchToMonadTestnet();
-      if (!switched) {
-        setIsConnecting(false);
+  // Auto-open wallet modal on mount if not connected
+  const hasAttemptedOpen = useRef(false);
+  
+  useEffect(() => {
+    // Wait for AppKit to fully initialize, then check connection status
+    // We check multiple times because connection status might not be immediately available
+    let checkCount = 0;
+    const maxChecks = 10; // Check up to 10 times (2 seconds total)
+    
+    const checkConnection = () => {
+      checkCount++;
+      
+      // If wallet is connected, don't open
+      if (isConnected && address) {
+        hasAttemptedOpen.current = true;
         return;
       }
-
-      // Request account access
-      await window.ethereum.request({ method: 'eth_requestAccounts' });
-
-      // Get provider and signer
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      providerRef.current = provider;
-      signerRef.current = await provider.getSigner();
-
-      // Initialize contract
-      if (CONTRACT_CONFIG.address !== '0x0000000000000000000000000000000000000000') {
-        contractRef.current = new ethers.Contract(
-          CONTRACT_CONFIG.address,
-          SHOTGUN_ROULETTE_ABI,
-          signerRef.current
-        );
+      
+      // If we've checked enough times and still not connected, open the modal
+      if (checkCount >= maxChecks) {
+        if (!hasAttemptedOpen.current) {
+          hasAttemptedOpen.current = true;
+          open();
+        }
+        return;
       }
-
-      // Get address and balance
-      const address = await signerRef.current.getAddress();
-      const balance = await provider.getBalance(address);
-
-      // Update state
-      setCryptoState(prev => ({
-        ...prev,
-        walletAddress: address,
-        balance: parseFloat(ethers.formatEther(balance))
-      }));
-      setIsWalletConnected(true);
-      setShowWalletModal(false);
-
-      // Listen for account changes
-      window.ethereum.on('accountsChanged', handleAccountsChanged);
-      window.ethereum.on('chainChanged', handleChainChanged);
-    } catch (error) {
-      console.error('Error connecting wallet:', error);
-      if (error.code === 4001) {
-        setConnectionError('Connection rejected by user');
-      } else {
-        setConnectionError('Failed to connect wallet. Please try again.');
-      }
-    } finally {
-      setIsConnecting(false);
-    }
-  };
-
-  const handleAccountsChanged = async (accounts) => {
-    if (accounts.length === 0) {
-      // User disconnected
-      setIsWalletConnected(false);
-      setCryptoState(prev => ({
-        ...prev,
-        walletAddress: '0x0000000000000000000000000000000000000000',
-        balance: 0
-      }));
-      setShowWalletModal(true);
-    } else {
-      // Account changed, reconnect
-      await checkWalletConnection();
-    }
-  };
-
-  const handleChainChanged = async (chainId) => {
-    const chainIdNum = parseInt(chainId, 16);
-    if (chainIdNum !== MONAD_CHAIN_ID) {
-      setIsWalletConnected(false);
-      setShowWalletModal(true);
-      setConnectionError('Please switch to Monad Testnet');
-    } else {
-      await checkWalletConnection();
-    }
-  };
-
-  // Check wallet connection on mount - show popup instead of auto-connecting
-  useEffect(() => {
-    // Always show connect wallet popup on initial load if not already connected
-    // User must explicitly click connect button - no auto-connection
-    if (!isWalletConnected) {
-      setShowWalletModal(true);
-    } else {
-      // If already connected, set up listeners
-      if (window.ethereum) {
-        window.ethereum.on('accountsChanged', handleAccountsChanged);
-        window.ethereum.on('chainChanged', handleChainChanged);
-      }
-    }
-
+      
+      // Check again after a short delay
+      setTimeout(checkConnection, 200);
+    };
+    
+    // Start checking after initial delay
+    const initialTimer = setTimeout(checkConnection, 300);
+    
     return () => {
-      if (window.ethereum) {
-        window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
-        window.ethereum.removeListener('chainChanged', handleChainChanged);
-      }
+      clearTimeout(initialTimer);
     };
-  }, []);
-
-  // Update balance periodically
-  useEffect(() => {
-    if (!isWalletConnected || !providerRef.current) return;
-
-    const updateBalance = async () => {
-      try {
-        const balance = await providerRef.current.getBalance(cryptoState.walletAddress);
-        setCryptoState(prev => ({
-          ...prev,
-          balance: parseFloat(ethers.formatEther(balance))
-        }));
-      } catch (error) {
-        console.error('Error updating balance:', error);
-      }
-    };
-
-    const interval = setInterval(updateBalance, 10000); // Update every 10 seconds
-    return () => clearInterval(interval);
-  }, [isWalletConnected, cryptoState.walletAddress]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount
 
   const [hoveredInventoryItem, setHoveredInventoryItem] = useState(null); // For inventory item tooltips
   const hoverTimeoutRef = useRef(null);
@@ -2707,11 +2613,12 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           <div className="z-10 w-full max-w-sm flex flex-col gap-4 animate-in slide-in-from-bottom-12 duration-1000 delay-200">
              <MenuButton 
                onClick={() => {
-                 if (!isWalletConnected) {
-                   setShowWalletModal(true);
-                 } else {
+                 // Only proceed to betting if wallet is connected
+                 // Don't open wallet modal here - it should already be open from page load
+                 if (isConnected && address) {
                    setCryptoState(p => ({...p, phase: 'betting'}));
                  }
+                 // If not connected, do nothing - the modal should already be open from page load
                }} 
                icon={<Skull className="w-5 h-5"/>} 
                label="Play" 
@@ -3838,95 +3745,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         .text-shadow-aberration { text-shadow: 1px 0 0 rgba(255,0,0,0.5), -1px 0 0 rgba(0,0,255,0.3); }
       `}</style>
 
-      {/* WALLET CONNECTION MODAL */}
-      {showWalletModal && (
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/95 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="relative max-w-md w-full mx-4 bg-zinc-900 border border-red-500/50 rounded-lg shadow-[0_0_60px_rgba(220,38,38,0.5)]">
-            {/* Header */}
-            <div className="sticky top-0 bg-zinc-900 border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Wallet className="w-6 h-6 text-red-500" />
-                <h2 className="text-xl font-black tracking-[0.15em] uppercase text-white">Connect Wallet</h2>
-              </div>
-              {isWalletConnected && (
-                <button 
-                  onClick={() => setShowWalletModal(false)}
-                  className="p-2 hover:bg-zinc-800 rounded-lg transition-colors text-zinc-400 hover:text-white"
-                  aria-label="Close"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              )}
-            </div>
-
-            {/* Content */}
-            <div className="px-6 py-6 space-y-6">
-              <div className="text-center">
-                <p className="text-zinc-300 text-sm mb-4">
-                  Connect your wallet to play Shotgun Roulette on Monad Testnet
-                </p>
-                <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-lg mb-4">
-                  <div className="text-xs text-zinc-500 uppercase tracking-wider mb-2">Network</div>
-                  <div className="text-lg font-bold text-red-500">Monad Testnet</div>
-                  <div className="text-xs text-zinc-600 mt-1">Chain ID: {MONAD_CHAIN_ID}</div>
-                </div>
-              </div>
-
-              {connectionError && (
-                <div className="p-4 bg-red-900/20 border border-red-500/50 rounded-lg">
-                  <p className="text-red-400 text-sm">{connectionError}</p>
-                </div>
-              )}
-
-              {!isWalletConnected && (
-                <button
-                  onClick={connectWallet}
-                  disabled={isConnecting}
-                  className="w-full py-4 bg-red-600 hover:bg-red-500 disabled:bg-red-900 disabled:opacity-50 text-white font-bold uppercase tracking-widest text-sm transition-all rounded flex items-center justify-center gap-2"
-                >
-                  {isConnecting ? (
-                    <>
-                      <RefreshCw className="w-5 h-5 animate-spin" />
-                      Connecting...
-                    </>
-                  ) : (
-                    <>
-                      <Wallet className="w-5 h-5" />
-                      Connect Wallet
-                    </>
-                  )}
-                </button>
-              )}
-
-              {isWalletConnected && (
-                <div className="space-y-4">
-                  <div className="p-4 bg-green-900/20 border border-green-500/50 rounded-lg">
-                    <div className="text-xs text-green-500 uppercase tracking-wider mb-2">Connected</div>
-                    <div className="font-mono text-sm text-green-400 break-all">
-                      {cryptoState.walletAddress}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setShowWalletModal(false)}
-                    className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-bold uppercase tracking-widest text-sm transition-all rounded"
-                  >
-                    Continue
-                  </button>
-                </div>
-              )}
-
-              {typeof window.ethereum === 'undefined' && (
-                <div className="p-4 bg-yellow-900/20 border border-yellow-500/50 rounded-lg">
-                  <p className="text-yellow-400 text-sm mb-2">No Web3 wallet detected</p>
-                  <p className="text-yellow-300 text-xs">
-                    Please install <a href="https://metamask.io" target="_blank" rel="noopener noreferrer" className="underline">MetaMask</a> or another Web3 wallet to continue.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* AppKit handles wallet connection modal automatically */}
 
       {/* PROFILE MODAL */}
       {showProfile && (
