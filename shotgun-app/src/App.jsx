@@ -416,6 +416,17 @@ const App = () => {
     }
   }, [isConnected, address, walletProvider]);
 
+  // Show "ESTABLISH LINK" pop-up after successful wallet connection if user clicked Play
+  useEffect(() => {
+    // If wallet just connected and user had clicked Play while not connected
+    if (isConnected && address && pendingPlayAfterConnect.current) {
+      // Reset the flag
+      pendingPlayAfterConnect.current = false;
+      // Show the betting phase (ESTABLISH LINK pop-up)
+      setCryptoState(prev => ({ ...prev, phase: 'betting' }));
+    }
+  }, [isConnected, address]);
+
   // Update balance periodically when connected
   useEffect(() => {
     if (!isConnected || !providerRef.current || !address) return;
@@ -485,6 +496,7 @@ const App = () => {
   // Also prevent AppKit from showing account view when wallet is already connected
   const hasAttemptedOpen = useRef(false);
   const connectionCheckTimer = useRef(null);
+  const pendingPlayAfterConnect = useRef(false); // Track if user clicked Play while not connected
   
   useEffect(() => {
     // Clear any existing timer
@@ -505,14 +517,15 @@ const App = () => {
       return;
     }
     
-    // Wait for AppKit to fully initialize, then check connection status one more time
+    // Open immediately if wallet is not connected
+    // Use a minimal delay (50ms) to ensure AppKit is ready, but make it feel instant
     connectionCheckTimer.current = setTimeout(() => {
       // Final check: only open if wallet is definitely NOT connected
       if (!isConnected && !address) {
         hasAttemptedOpen.current = true;
         open(); // Only opens connect modal when not connected
       }
-    }, 1000); // Give AppKit time to initialize and check connection
+    }, 50); // Minimal delay to ensure AppKit is ready
     
     return () => {
       if (connectionCheckTimer.current) {
@@ -2613,12 +2626,15 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           <div className="z-10 w-full max-w-sm flex flex-col gap-4 animate-in slide-in-from-bottom-12 duration-1000 delay-200">
              <MenuButton 
                onClick={() => {
-                 // Only proceed to betting if wallet is connected
-                 // Don't open wallet modal here - it should already be open from page load
+                 // If wallet is connected, proceed to betting
                  if (isConnected && address) {
                    setCryptoState(p => ({...p, phase: 'betting'}));
+                 } else {
+                   // If wallet is not connected, mark that we should show betting after connection
+                   pendingPlayAfterConnect.current = true;
+                   // Show the connect wallet popup
+                   open();
                  }
-                 // If not connected, do nothing - the modal should already be open from page load
                }} 
                icon={<Skull className="w-5 h-5"/>} 
                label="Play" 
