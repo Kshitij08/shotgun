@@ -2770,7 +2770,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                     <button 
                         onClick={handleStartGame}
                         disabled={isContractLoading || !contractRef.current || !CONTRACT_CONFIG.address || CONTRACT_CONFIG.address === '0x0000000000000000000000000000000000000000'}
-                        className="flex-[2] py-4 bg-red-900/20 border border-red-500/50 hover:bg-red-900/40 hover:border-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-red-500 font-black tracking-[0.2em] uppercase transition-all duration-300 group"
+                        className="flex-[3] min-w-[200px] py-4 bg-red-900/20 border border-red-500/50 hover:bg-red-900/40 hover:border-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-red-500 font-black tracking-[0.2em] uppercase transition-all duration-300 group whitespace-nowrap"
                     >
                         {isContractLoading ? (
                           <AnimatedLoadingText status={entropyStatus} />
