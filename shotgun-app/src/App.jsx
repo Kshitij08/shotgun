@@ -339,6 +339,134 @@ const MONAD_TESTNET = {
 
 const MONAD_CHAIN_ID = 10143;
 
+// Animated Loading Text Component (for Pyth loading)
+const AnimatedLoadingText = ({ status }) => {
+  const [dots, setDots] = useState('.');
+
+  useEffect(() => {
+    if (!status || status === 'received') return;
+
+    const interval = setInterval(() => {
+      setDots(prev => {
+        if (prev === '.') return '..';
+        if (prev === '..') return '...';
+        return '.';
+      });
+    }, 500); // Change every 500ms
+
+    return () => clearInterval(interval);
+  }, [status]);
+
+  const baseText =
+    status === 'requesting'
+      ? 'Requesting'
+      : status === 'waiting'
+        ? 'Waiting for Pyth'
+        : 'Processing';
+
+  return <span>{baseText}{dots}</span>;
+};
+
+// Main Menu Button Component
+const MenuButton = ({ onClick, icon, label, primary }) => (
+  <button 
+    onClick={(e) => {
+      e.stopPropagation();
+      if (onClick) onClick(e);
+    }}
+    className={`group relative w-full py-4 border transition-all duration-200 ease-in-out overflow-hidden cursor-pointer ${
+      primary 
+        ? 'bg-red-900/20 border-red-500/50 hover:bg-red-900/40 hover:border-red-500' 
+        : 'bg-zinc-900 border-zinc-800 hover:border-red-500/50 hover:bg-zinc-800'
+    }`}
+  >
+    {!primary && (
+      <div className="absolute inset-0 bg-red-500/0 group-hover:bg-red-500/5 transition-all duration-200 ease-in-out pointer-events-none" />
+    )}
+    <div className="flex items-center justify-center gap-4 relative z-10">
+      <span className={`transition-colors duration-200 ease-in-out ${primary ? 'text-red-500' : 'text-zinc-500 group-hover:text-red-400'}`}>
+        {icon}
+      </span>
+      <span className={`font-black tracking-[0.2em] uppercase transition-colors duration-200 ease-in-out ${primary ? 'text-red-500' : 'text-zinc-400 group-hover:text-zinc-200'}`}>
+        {label}
+      </span>
+    </div>
+  </button>
+);
+
+// Inventory Bar Component
+const InventoryBar = ({
+  items,
+  owner,
+  max,
+  onUse,
+  isPlayer,
+  hoveredItem,
+  onHoverItem,
+  onHoverLeave,
+}) => {
+  return (
+    <div 
+      className="flex flex-col items-center gap-2"
+      onMouseLeave={onHoverLeave}
+    >
+      <div className="text-[0.5rem] sm:text-[0.6rem] md:text-[0.65rem] text-zinc-300 tracking-[0.25em] sm:tracking-[0.32em] uppercase font-bold text-shadow-glow">
+        {owner} Items
+      </div>
+      <div className="flex gap-2 sm:gap-2 p-2 sm:p-2 bg-zinc-900/80 border border-zinc-700 rounded-lg backdrop-blur-sm shadow-[0_0_20px_rgba(20,0,0,0.5)]">
+        {[...Array(max)].map((_, i) => {
+          const item = items[i];
+          // Check hover by comparing item id
+          const isHovered = item && hoveredItem && hoveredItem.id === item.id;
+          return (
+            <div 
+              key={i}
+              onClick={() => {
+                if (isPlayer && item && onUse) {
+                  onUse(item);
+                }
+              }}
+              onMouseEnter={() => {
+                if (item && onHoverItem) onHoverItem(item);
+              }}
+              onMouseLeave={onHoverLeave}
+              className={`w-12 h-12 sm:w-10 sm:h-10 md:w-12 md:h-12 border flex items-center justify-center transition-all duration-200 relative overflow-hidden rounded-md
+                ${item 
+                  ? `bg-zinc-800 shadow-inner ${isPlayer ? 'cursor-pointer' : 'cursor-default'} ${isHovered ? 'border-red-500 scale-110 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'border-red-500/50 hover:border-red-400'}`
+                  : 'bg-transparent border-zinc-800 text-zinc-700'
+                }`}
+            >
+              {item ? (
+                <div className={`transition-colors duration-200 ${isHovered ? 'text-red-400' : 'text-zinc-200'}`}>
+                  {React.cloneElement(item.icon, { className: "w-5 h-5 sm:w-4 sm:h-4 md:w-5 md:h-5" })}
+                </div>
+              ) : (
+                <div className="w-1 h-1 bg-zinc-700 rounded-full" />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// Health bar component
+const HealthBar = ({ health, max = 4, side = 'left' }) => (
+  <div className={`flex items-center gap-1.5 sm:gap-1 md:gap-2 ${side === 'right' ? 'flex-row-reverse' : ''}`}>
+    {[...Array(max)].map((_, i) => (
+      <div 
+        key={i} 
+        className={`w-6 h-7 sm:w-5 sm:h-6 md:w-6 md:h-8 lg:w-8 lg:h-10 border-2 transition-all duration-1000 ${
+          i < health 
+            ? 'bg-red-600 border-red-400 shadow-[0_0_15px_rgba(220,38,38,0.6)] animate-pulse-slow' 
+            : 'bg-zinc-900 border-zinc-800 opacity-50'
+        } rounded-sm`}
+      />
+    ))}
+  </div>
+);
+
 const App = () => {
   // --- APPKIT HOOKS ---
   const { open, close } = useAppKit();
@@ -2452,125 +2580,6 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
     return 'group-hover:scale-[1.02] group-hover:-rotate-1'; 
   };
 
-  // --- UI COMPONENTS ---
-
-  // Animated Loading Text Component (for Pyth loading)
-  const AnimatedLoadingText = ({ status }) => {
-    const [dots, setDots] = useState('.');
-    
-    useEffect(() => {
-      if (!status || status === 'received') return;
-      
-      const interval = setInterval(() => {
-        setDots(prev => {
-          if (prev === '.') return '..';
-          if (prev === '..') return '...';
-          return '.';
-        });
-      }, 500); // Change every 500ms
-      
-      return () => clearInterval(interval);
-    }, [status]);
-    
-    const baseText = status === 'requesting' ? 'Requesting' : 
-                     status === 'waiting' ? 'Waiting for Pyth' : 
-                     'Processing';
-    
-    return <span>{baseText}{dots}</span>;
-  };
-
-  // Main Menu Button Component
-  const MenuButton = ({ onClick, icon, label, primary }) => (
-    <button 
-      onClick={(e) => {
-        e.stopPropagation();
-        if (onClick) onClick(e);
-      }}
-      className={`group relative w-full py-4 border transition-all duration-200 ease-in-out overflow-hidden cursor-pointer ${
-        primary 
-          ? 'bg-red-900/20 border-red-500/50 hover:bg-red-900/40 hover:border-red-500' 
-          : 'bg-zinc-900 border-zinc-800 hover:border-red-500/50 hover:bg-zinc-800'
-      }`}
-    >
-      {!primary && (
-        <div className="absolute inset-0 bg-red-500/0 group-hover:bg-red-500/5 transition-all duration-200 ease-in-out pointer-events-none" />
-      )}
-      <div className="flex items-center justify-center gap-4 relative z-10">
-        <span className={`transition-colors duration-200 ease-in-out ${primary ? 'text-red-500' : 'text-zinc-500 group-hover:text-red-400'}`}>
-          {icon}
-        </span>
-        <span className={`font-black tracking-[0.2em] uppercase transition-colors duration-200 ease-in-out ${primary ? 'text-red-500' : 'text-zinc-400 group-hover:text-zinc-200'}`}>
-          {label}
-        </span>
-      </div>
-        </button>
-  );
-  // Render inventory bar inline to avoid component recreation issues
-  const renderInventoryBar = (items, owner, max, onUse, isPlayer) => {
-    return (
-      <div 
-        className="flex flex-col items-center gap-2"
-        onMouseLeave={clearHoverWithDelay}
-      >
-        <div className="text-[0.5rem] sm:text-[0.6rem] md:text-[0.65rem] text-zinc-300 tracking-[0.25em] sm:tracking-[0.32em] uppercase font-bold text-shadow-glow">
-          {owner} Items
-        </div>
-        <div className="flex gap-2 sm:gap-2 p-2 sm:p-2 bg-zinc-900/80 border border-zinc-700 rounded-lg backdrop-blur-sm shadow-[0_0_20px_rgba(20,0,0,0.5)]">
-          {[...Array(max)].map((_, i) => {
-            const item = items[i];
-            // Check hover by comparing item id
-            const isHovered = item && hoveredInventoryItem && hoveredInventoryItem.id === item.id;
-            return (
-              <div 
-                key={i}
-                onClick={() => {
-                  if (isPlayer && item && onUse) {
-                    // Immediately clear on use
-                    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-                    setHoveredInventoryItem(null);
-                    onUse(item);
-                  }
-                }}
-                onMouseEnter={() => {
-                  if (item) setHoverItem(item);
-                }}
-                onMouseLeave={clearHoverWithDelay}
-                className={`w-12 h-12 sm:w-10 sm:h-10 md:w-12 md:h-12 border flex items-center justify-center transition-all duration-200 relative overflow-hidden rounded-md
-                  ${item 
-                    ? `bg-zinc-800 shadow-inner ${isPlayer ? 'cursor-pointer' : 'cursor-default'} ${isHovered ? 'border-red-500 scale-110 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'border-red-500/50 hover:border-red-400'}`
-                    : 'bg-transparent border-zinc-800 text-zinc-700'
-                  }`}
-              >
-                {item ? (
-                  <div className={`transition-colors duration-200 ${isHovered ? 'text-red-400' : 'text-zinc-200'}`}>
-                    {React.cloneElement(item.icon, { className: "w-5 h-5 sm:w-4 sm:h-4 md:w-5 md:h-5" })}
-                  </div>
-                ) : (
-                  <div className="w-1 h-1 bg-zinc-700 rounded-full" />
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
-
-  const HealthBar = ({ health, max = 4, side = 'left' }) => (
-    <div className={`flex items-center gap-1.5 sm:gap-1 md:gap-2 ${side === 'right' ? 'flex-row-reverse' : ''}`}>
-      {[...Array(max)].map((_, i) => (
-        <div 
-          key={i} 
-          className={`w-6 h-7 sm:w-5 sm:h-6 md:w-6 md:h-8 lg:w-8 lg:h-10 border-2 transition-all duration-1000 ${
-            i < health 
-              ? 'bg-red-600 border-red-400 shadow-[0_0_15px_rgba(220,38,38,0.6)] animate-pulse-slow' 
-              : 'bg-zinc-900 border-zinc-800 opacity-50'
-          } rounded-sm`}
-        />
-      ))}
-    </div>
-  );
-
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-200 font-mono overflow-hidden flex flex-col relative selection:bg-red-900 selection:text-white">
       
@@ -3294,7 +3303,16 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               )}
             </div>
             
-            {renderInventoryBar(gameState.dealerInventory, "Dealer", 4, null, false)}
+            <InventoryBar
+              items={gameState.dealerInventory}
+              owner="Dealer"
+              max={4}
+              onUse={null}
+              isPlayer={false}
+              hoveredItem={hoveredInventoryItem}
+              onHoverItem={setHoverItem}
+              onHoverLeave={clearHoverWithDelay}
+            />
           </div>
         </div>
 
@@ -3651,7 +3669,16 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               )}
             </div>
             
-            {renderInventoryBar(gameState.playerInventory, "Player", 4, isPlayerTurn ? handleUseItem : null, true)}
+            <InventoryBar
+              items={gameState.playerInventory}
+              owner="Player"
+              max={4}
+              onUse={isPlayerTurn ? handleUseItem : null}
+              isPlayer
+              hoveredItem={hoveredInventoryItem}
+              onHoverItem={setHoverItem}
+              onHoverLeave={clearHoverWithDelay}
+            />
           </div>
         </div>
 
