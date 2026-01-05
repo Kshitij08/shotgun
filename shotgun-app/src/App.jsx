@@ -1824,12 +1824,17 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           break;
         }
         case 'SHIELD': {
-          // Add shield to block next 1 damage
-          tempEffects[actor] = { ...tempEffects[actor], shieldNextDamage: (tempEffects[actor]?.shieldNextDamage || 0) + 1 };
-          telemetry.push(`${ACTOR_LABEL[actor]}: Shield → blocked for 1 damage`);
-          if (actor === 'player') {
-            setEffectOverlay('shield');
-            setTimeout(() => setEffectOverlay(null), 1000);
+          // Add shield to block next 1 damage (only if no shield is already active)
+          const currentShield = tempEffects[actor]?.shieldNextDamage || 0;
+          if (currentShield === 0) {
+            tempEffects[actor] = { ...tempEffects[actor], shieldNextDamage: 1 };
+            telemetry.push(`${ACTOR_LABEL[actor]}: Shield → blocked for 1 damage`);
+            if (actor === 'player') {
+              setEffectOverlay('shield');
+              setTimeout(() => setEffectOverlay(null), 1000);
+            }
+          } else {
+            telemetry.push(`${ACTOR_LABEL[actor]}: Shield wasted (already active)`);
           }
           break;
         }
@@ -2204,15 +2209,9 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         scheduleDealerTurnDelay();
         return;
       }
-      // If we know it's live and can't heal, shoot player instead of using inverter
-      if (effectiveKnownShell === 'LIVE') {
-        // If known live and no escape, use Shield as last resort
-        if (hasItem('SHIELD') && useItem('SHIELD')) {
-          scheduleDealerTurnDelay();
-          return;
-        }
-        // Otherwise, shoot player with live shell
-        aimAndShoot('player');
+      // Use Shield if available (simple defensive strategy)
+      if (hasItem('SHIELD') && useItem('SHIELD')) {
+        scheduleDealerTurnDelay();
         return;
       }
       // If unknown but high live odds, use Beer to eject dangerous shell
@@ -2220,11 +2219,19 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         scheduleDealerTurnDelay();
         return;
       }
-      // If unknown and high live odds, use Shield
-      if (!effectiveKnownShell && pLive >= 0.5 && hasItem('SHIELD') && useItem('SHIELD')) {
-        scheduleDealerTurnDelay();
+      // If we know it's live and can't heal/defend, shoot player
+      if (effectiveKnownShell === 'LIVE') {
+        aimAndShoot('player');
         return;
       }
+    }
+
+    // ===== SHIELD USAGE =====
+    // Use Shield if available and not already active (defensive priority)
+    const hasActiveShield = current.tempEffects?.dealer?.shieldNextDamage > 0;
+    if (hasItem('SHIELD') && !hasActiveShield && useItem('SHIELD')) {
+      scheduleDealerTurnDelay();
+      return;
     }
 
     // ===== KNOWN SHELL LOGIC =====
@@ -2249,11 +2256,6 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       }
       // Use Hand Saw when shell is known to be live for double damage
       if (hasItem('HAND_SAW') && useItem('HAND_SAW')) {
-        scheduleDealerTurnDelay();
-        return;
-      }
-      // If player has HP advantage and might retaliate, use Shield
-      if (hpAdvantage < 0 && hasItem('SHIELD') && useItem('SHIELD')) {
         scheduleDealerTurnDelay();
         return;
       }
