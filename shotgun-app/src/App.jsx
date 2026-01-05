@@ -3606,7 +3606,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               disabled={!isPlayerTurn}
               className="group relative px-6 sm:px-6 md:px-8 py-3 sm:py-3 md:py-4 bg-zinc-900 border border-zinc-700 text-zinc-300 text-sm sm:text-[0.65rem] md:text-[0.7rem] font-black uppercase tracking-widest hover:border-red-500 hover:text-red-400 transition-all active:scale-95 hover:shadow-[0_0_15px_rgba(220,38,38,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Point at Self
+              Shoot Self
             </button>
             <button 
               onClick={handleShootDealer}
@@ -3615,7 +3615,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
               disabled={!isPlayerTurn}
               className="group relative px-6 sm:px-6 md:px-8 py-3 sm:py-3 md:py-4 bg-zinc-900 border border-zinc-700 text-zinc-300 text-sm sm:text-[0.65rem] md:text-[0.7rem] font-black uppercase tracking-widest hover:border-red-500 hover:text-red-400 transition-all active:scale-95 hover:shadow-[0_0_15px_rgba(220,38,38,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Point at Him
+              Shoot Dealer
             </button>
           </div>
 
