@@ -602,6 +602,7 @@ const App = () => {
   // --- SOUND MANAGER ---
   const bgmAudioRef = useRef(null);
   const soundEffectsRef = useRef({});
+  const bgmStartedRef = useRef(false);
   
   // Initialize sound effects
   useEffect(() => {
@@ -629,8 +630,7 @@ const App = () => {
     bgmAudioRef.current.loop = true;
     bgmAudioRef.current.volume = 0.3; // BGM at 30% volume
     
-    // Start playing BGM immediately when app loads
-    bgmAudioRef.current.play().catch(err => console.warn('BGM play failed:', err));
+    // Don't try to autoplay - browsers block this. Will start on first user interaction.
     
     // Set initial volume for all sounds
     Object.values(soundEffectsRef.current).forEach(audio => {
@@ -660,8 +660,35 @@ const App = () => {
     });
   }, [volume, isMuted]);
   
+  // Start BGM on first user interaction (browsers require user interaction for autoplay)
+  const startBGM = () => {
+    if (!bgmStartedRef.current && bgmAudioRef.current && !isMuted) {
+      bgmStartedRef.current = true;
+      bgmAudioRef.current.play().catch(err => console.warn('BGM play failed:', err));
+    }
+  };
+  
+  // Add document-level click handler to start BGM on first click (backup)
+  // This ensures BGM starts even if playSound isn't called
+  useEffect(() => {
+    const handleClick = () => {
+      startBGM();
+    };
+    
+    // Use once: true to only listen for the first click
+    // If BGM doesn't start (e.g., muted), playSound will handle it on subsequent clicks
+    document.addEventListener('click', handleClick, { once: true });
+    
+    return () => {
+      document.removeEventListener('click', handleClick);
+    };
+  }, []);
+  
   // Play sound effect helper
   const playSound = (soundName) => {
+    // Start BGM on first user interaction
+    startBGM();
+    
     if (isMuted || !soundEffectsRef.current[soundName]) return;
     const audio = soundEffectsRef.current[soundName];
     // Clone audio to allow overlapping sounds (important for bullet eject which can play multiple times)
@@ -671,7 +698,7 @@ const App = () => {
     audioClone.play().catch(err => console.warn('Sound play failed:', err, 'for sound:', soundName));
   };
   
-  // Keep BGM playing at all times (already started on load)
+  // Keep BGM playing at all times (starts on first user interaction)
   // BGM continues playing through all phases including main menu
   
   // --- HOW TO PLAY MODAL ---
@@ -2461,155 +2488,140 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
     const isDealerLow = current.dealerHealth <= 2;
     const isDealerCritical = current.dealerHealth <= 1;
 
-    // ===== CRITICAL SURVIVAL PRIORITIES =====
-    // If dealer is at 1 HP, prioritize survival above all else
-    if (isDealerCritical) {
-      // Heal if possible
-      if (useItem('CIGARETTES')) {
-        scheduleDealerTurnDelay();
-        return;
-      }
-      // Use Shield if available (simple defensive strategy)
-      if (hasItem('SHIELD') && useItem('SHIELD')) {
-        scheduleDealerTurnDelay();
-        return;
-      }
-      // If unknown but high live odds, use Beer to eject dangerous shell
-      if (!effectiveKnownShell && pLive > 0.6 && useItem('BEER')) {
-        scheduleDealerTurnDelay();
-        return;
-      }
-      // If we know it's live and can't heal/defend, shoot player
-      if (effectiveKnownShell === 'LIVE') {
-        aimAndShoot('player');
-        return;
-      }
-    }
-
-    // ===== SHIELD USAGE =====
-    // Use Shield if available and not already active (defensive priority)
+    // ========================================
+    // NIGHTMARE MODE DEALER AI - RUTHLESS
+    // ========================================
+    
     const hasActiveShield = current.tempEffects?.dealer?.shieldNextDamage > 0;
-    if (hasItem('SHIELD') && !hasActiveShield && useItem('SHIELD')) {
+    const hasDoubleDamage = current.tempEffects?.dealer?.doubleDamageNextShot;
+
+    // ===== PRIORITY 1: IMMEDIATE ITEM DISRUPTION =====
+    // ALWAYS steal from player first - deny them any advantage
+    if (current.playerInventory.length > 0 && current.dealerInventory.length < MAX_INVENTORY) {
+      if (useItem('STEAL')) {
+        scheduleDealerTurnDelay();
+        return;
+      }
+    }
+    
+    // ALWAYS destroy player items if we have Shake Down
+    if (current.playerInventory.length > 0 && useItem('SHAKE_DOWN')) {
       scheduleDealerTurnDelay();
       return;
     }
 
-    // ===== KNOWN SHELL LOGIC =====
-    // Known blank: ALWAYS shoot self to get skip (blanks don't damage player)
+    // ===== PRIORITY 2: SKIP - ALWAYS USE TO DENY PLAYER TURNS =====
+    // Skip is incredibly powerful - use it immediately, no conditions
+    if (hasItem('SKIP') && useItem('SKIP')) {
+      scheduleDealerTurnDelay();
+      return;
+    }
+
+    // ===== PRIORITY 3: SHIELD - ALWAYS PROTECT YOURSELF =====
+    if (!hasActiveShield && useItem('SHIELD')) {
+      scheduleDealerTurnDelay();
+      return;
+    }
+
+    // ===== PRIORITY 4: CIGARETTES - ALWAYS HEAL IF NOT MAX HP =====
+    if (current.dealerHealth < 4 && useItem('CIGARETTES')) {
+      scheduleDealerTurnDelay();
+      return;
+    }
+
+    // ===== PRIORITY 5: MAGNIFYING GLASS - INFORMATION IS POWER =====
+    // ALWAYS use to gain information if shell is unknown
+    if (!effectiveKnownShell && remaining > 0 && useItem('MAGNIFYING_GLASS')) {
+      scheduleDealerTurnDelay();
+      return;
+    }
+
+    // ===== PRIORITY 6: KNOWN SHELL EXPLOITATION =====
     if (effectiveKnownShell === 'BLANK') {
-      // Exception: If player is at 1 HP and we have Inverter, turn blank into live for kill
-      if (current.playerHealth === 1 && hasItem('INVERTER') && useItem('INVERTER')) {
+      // AGGRESSIVE: Always use Inverter with blank - turn it into live to attack
+      if (hasItem('INVERTER') && useItem('INVERTER')) {
         scheduleDealerTurnDelay();
         return;
       }
-      // Always shoot self with blank to get skip turn advantage
+      // Shoot self with blank to get another turn
       aimAndShoot('dealer');
       return;
     }
 
-    // Known live: offensive play - ALWAYS shoot player, never use items like Beer
     if (effectiveKnownShell === 'LIVE') {
-      // If all remaining shells are live and dealer has skip item, use it to skip player's turn
-      if (pLive === 1.0 && hasItem('SKIP') && useItem('SKIP')) {
+      // ALWAYS use Hand Saw with live shell for devastating double damage
+      if (!hasDoubleDamage && useItem('HAND_SAW')) {
         scheduleDealerTurnDelay();
         return;
       }
-      // Use Hand Saw when shell is known to be live for double damage
-      if (hasItem('HAND_SAW') && useItem('HAND_SAW')) {
-        scheduleDealerTurnDelay();
-        return;
-      }
-      // Shoot player with live shell (don't use inverter even if available)
+      // Execute the player
       aimAndShoot('player');
       return;
     }
 
-    // ===== UNKNOWN SHELL LOGIC =====
-    // Use Magnifying Glass when uncertainty is high and decision matters
-    if (!effectiveKnownShell && remaining > 0) {
-      // Use glass if dealer is low and needs to know if safe to shoot self
-      if (isDealerLow && pLive > 0.4 && pLive < 0.7 && useItem('MAGNIFYING_GLASS')) {
+    // ===== PRIORITY 7: SPECULATIVE HAND SAW =====
+    // Use Hand Saw even when unknown - gamble on hitting live
+    if (!hasDoubleDamage && pLive >= 0.35 && useItem('HAND_SAW')) {
+      scheduleDealerTurnDelay();
+      return;
+    }
+
+    // ===== PRIORITY 8: BEER - MANIPULATE THE CHAMBER =====
+    // Use Beer aggressively to control the round
+    if (!effectiveKnownShell && remaining > 1) {
+      // If mostly blanks, eject to increase live odds for our shot
+      if (pLive < 0.5 && useItem('BEER')) {
         scheduleDealerTurnDelay();
         return;
       }
-      // Use glass in mid-uncertainty range for better decision making
-      if (pLive > 0.35 && pLive < 0.65 && useItem('MAGNIFYING_GLASS')) {
+      // If mostly live, eject to potentially remove a live before player's turn
+      if (pLive > 0.5 && hpAdvantage >= 0 && useItem('BEER')) {
         scheduleDealerTurnDelay();
         return;
       }
     }
 
-    // ===== ITEM USAGE PRIORITIES =====
-    // Hand Saw: Use when we can secure a kill or significant advantage
-    if (!effectiveKnownShell && pLive >= 0.65 && canKillPlayer && hasItem('HAND_SAW') && useItem('HAND_SAW')) {
+    // ===== PRIORITY 9: INVERTER - FLIP ODDS IN OUR FAVOR =====
+    // Use Inverter speculatively when we're about to shoot player
+    if (!effectiveKnownShell && pLive < 0.5 && hasItem('INVERTER') && useItem('INVERTER')) {
+      // If mostly blanks, flip to make it more likely live when we shoot player
       scheduleDealerTurnDelay();
       return;
     }
 
-    // Beer: Eject dangerous live shells when dealer is low (never use if shell is known to be live)
-    if (!effectiveKnownShell && pLive > 0.5 && isDealerLow && useItem('BEER')) {
+    // ===== PRIORITY 10: RANDOM PILL - TAKE THE GAMBLE =====
+    // Use Random Pill aggressively - any chance to gain HP is worth it
+    if (current.dealerHealth < 4 && useItem('RANDOM_PILL')) {
       scheduleDealerTurnDelay();
       return;
     }
 
-    // Skip: Use when we want to force player to take a risky shot (high live odds)
-    // This is better than shooting ourselves when odds are against us
-    if (!effectiveKnownShell && pLive >= 0.5 && hpAdvantage <= 0 && useItem('SKIP')) {
-      scheduleDealerTurnDelay();
-      return;
-    }
-
-    // Random Pill: Use when low HP and no better options (risky but can help)
-    if (isDealerLow && hasItem('RANDOM_PILL') && !hasItem('CIGARETTES') && useItem('RANDOM_PILL')) {
-      scheduleDealerTurnDelay();
-      return;
-    }
-
-    // Steal: Only if we have space and player has items (low priority)
-    if (current.playerInventory.length > 0 && current.dealerInventory.length < MAX_INVENTORY && useItem('STEAL')) {
-      scheduleDealerTurnDelay();
-      return;
-    }
-
-    // Shake Down: Disrupt player if they have multiple items
-    if (current.playerInventory.length >= 2 && useItem('SHAKE_DOWN')) {
-      scheduleDealerTurnDelay();
-      return;
-    }
-
-    // ===== SHOOTING DECISIONS =====
-    // When live probability >= 50%: shoot player (aggressive)
-    if (pLive >= 0.5) {
+    // ===== SHOOTING DECISIONS - MAXIMUM AGGRESSION =====
+    // Threshold: >= 30% live = shoot player (extremely aggressive)
+    if (pLive >= 0.3) {
       aimAndShoot('player');
       return;
     }
 
-    // Low live odds: shoot self to earn skip (defensive)
-    if (pLive <= 0.3) {
+    // Very low live odds (< 20%): shoot self for skip
+    if (pLive < 0.2) {
       aimAndShoot('dealer');
       return;
     }
 
-    // Mid odds (0.3 < pLive < 0.5): Strategic decision
-    // If we have HP advantage, be more aggressive
-    if (hpAdvantage > 0) {
+    // Borderline (20-30%): Always aggressive - shoot player
+    // The dealer plays to WIN, not to survive
+    if (hpAdvantage >= 0) {
+      // We're ahead or tied - go for the kill
       aimAndShoot('player');
       return;
     }
-    // If player has advantage or equal, be more defensive
-    if (hpAdvantage <= 0) {
-      // If dealer is at 2 HP or more (not critical), shoot self to get skip
-      if (current.dealerHealth >= 2) {
-        aimAndShoot('dealer');
-        return;
-      }
-      // Otherwise, slight bias toward player (60/40)
-      if (random() < 0.6) {
-        aimAndShoot('player');
-      } else {
-        aimAndShoot('dealer');
-      }
-      return;
+
+    // Even when behind, 80% chance to be aggressive
+    if (random() < 0.8) {
+      aimAndShoot('player');
+    } else {
+      aimAndShoot('dealer');
     }
   };
 
