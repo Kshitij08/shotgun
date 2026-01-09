@@ -3,6 +3,25 @@ import { ethers } from 'ethers';
 import { useAppKit, useAppKitAccount, useAppKitProvider } from '@reown/appkit/react';
 import { CONTRACT_CONFIG, SHOTGUN_ROULETTE_ABI, SERVER_URL } from './contractConfig';
 import { verifyRNGComponents, formatRNGData, verifyBaseSeed } from './utils/rngVerification';
+
+// Sound imports
+import bgmSound from './assets/sfx/bgm.mp3';
+import gunshotSound from './assets/sfx/gunshot.mp3';
+import bulletEjectSound from './assets/sfx/bullet eject.mp3';
+import rouletteWheelSound from './assets/sfx/roulette wheel.mp3';
+import magnifyingGlassSound from './assets/sfx/magnifying glass.mp3';
+import beerSound from './assets/sfx/beer.mp3';
+import stealSound from './assets/sfx/steal.mp3';
+import skipSound from './assets/sfx/skip.mp3';
+import shieldSound from './assets/sfx/shield.mp3';
+import sawSound from './assets/sfx/saw.mp3';
+import invertSound from './assets/sfx/invert.mp3';
+import healSound from './assets/sfx/heal.mp3';
+import healDamageSound from './assets/sfx/heal damage.mp3';
+import cigaretteSound from './assets/sfx/cigarette.mp3';
+import discardSound from './assets/sfx/discard.mp3';
+import uiClickSound from './assets/sfx/ui click.mp3';
+import blankSound from './assets/sfx/blank.mp3';
 import { 
   Skull, 
   User,
@@ -368,10 +387,11 @@ const AnimatedLoadingText = ({ status }) => {
 };
 
 // Main Menu Button Component
-const MenuButton = ({ onClick, icon, label, primary }) => (
+const MenuButton = ({ onClick, icon, label, primary, playSound }) => (
   <button 
     onClick={(e) => {
       e.stopPropagation();
+      if (playSound) playSound('uiClick');
       if (onClick) onClick(e);
     }}
     className={`group relative w-full py-4 border transition-all duration-200 ease-in-out overflow-hidden cursor-pointer ${
@@ -578,6 +598,81 @@ const App = () => {
   // --- AUDIO STATE ---
   const [volume, setVolume] = useState(50);
   const [isMuted, setIsMuted] = useState(false);
+  
+  // --- SOUND MANAGER ---
+  const bgmAudioRef = useRef(null);
+  const soundEffectsRef = useRef({});
+  
+  // Initialize sound effects
+  useEffect(() => {
+    soundEffectsRef.current = {
+      gunshot: new Audio(gunshotSound),
+      bulletEject: new Audio(bulletEjectSound),
+      rouletteWheel: new Audio(rouletteWheelSound),
+      magnifyingGlass: new Audio(magnifyingGlassSound),
+      beer: new Audio(beerSound),
+      steal: new Audio(stealSound),
+      skip: new Audio(skipSound),
+      shield: new Audio(shieldSound),
+      saw: new Audio(sawSound),
+      invert: new Audio(invertSound),
+      heal: new Audio(healSound),
+      healDamage: new Audio(healDamageSound),
+      cigarette: new Audio(cigaretteSound),
+      discard: new Audio(discardSound),
+      uiClick: new Audio(uiClickSound),
+      blank: new Audio(blankSound)
+    };
+    
+    // Initialize BGM
+    bgmAudioRef.current = new Audio(bgmSound);
+    bgmAudioRef.current.loop = true;
+    bgmAudioRef.current.volume = 0.3; // BGM at 30% volume
+    
+    // Start playing BGM immediately when app loads
+    bgmAudioRef.current.play().catch(err => console.warn('BGM play failed:', err));
+    
+    // Set initial volume for all sounds
+    Object.values(soundEffectsRef.current).forEach(audio => {
+      audio.volume = volume / 100;
+    });
+    
+    return () => {
+      // Cleanup
+      if (bgmAudioRef.current) {
+        bgmAudioRef.current.pause();
+        bgmAudioRef.current = null;
+      }
+      Object.values(soundEffectsRef.current).forEach(audio => {
+        audio.pause();
+      });
+      soundEffectsRef.current = {};
+    };
+  }, []);
+  
+  // Update volume for all sounds when volume changes
+  useEffect(() => {
+    if (bgmAudioRef.current) {
+      bgmAudioRef.current.volume = isMuted ? 0 : (volume / 100) * 0.3; // BGM at 30% of volume
+    }
+    Object.values(soundEffectsRef.current).forEach(audio => {
+      audio.volume = isMuted ? 0 : volume / 100;
+    });
+  }, [volume, isMuted]);
+  
+  // Play sound effect helper
+  const playSound = (soundName) => {
+    if (isMuted || !soundEffectsRef.current[soundName]) return;
+    const audio = soundEffectsRef.current[soundName];
+    // Clone audio to allow overlapping sounds (important for bullet eject which can play multiple times)
+    const audioClone = audio.cloneNode();
+    audioClone.volume = audio.volume;
+    audioClone.currentTime = 0;
+    audioClone.play().catch(err => console.warn('Sound play failed:', err, 'for sound:', soundName));
+  };
+  
+  // Keep BGM playing at all times (already started on load)
+  // BGM continues playing through all phases including main menu
   
   // --- HOW TO PLAY MODAL ---
   const [showHowToPlay, setShowHowToPlay] = useState(false);
@@ -803,6 +898,17 @@ const App = () => {
   const triggerShell = (type, color = 'red') => {
     const id = `${rngSeedRef.current}-${Math.floor(random() * 1_000_000)}`;
     setShell({ type, id, color });
+    
+    // Play bullet eject sound when:
+    // 1. Showing bullet eject animation (side type) - for beer item
+    // 2. Shooting with blank shell (white color) - blank shells are ejected
+    if (type === 'side' || color === 'white') {
+      // Use a small delay to ensure the animation state is set before playing sound
+      setTimeout(() => {
+        playSound('bulletEject');
+      }, 10);
+    }
+    
     setTimeout(() => {
       setShell(prev => (prev && prev.id === id ? null : prev));
     }, 800);
@@ -885,6 +991,9 @@ const App = () => {
     const base = Math.ceil(currentWheel.rotation / 360) * 360;
     const rotation = base + extraSpins + targetRotation + noise;
     const startTurnForRound = currentWheel.startTurn || 'player';
+    
+    // Play roulette wheel sound
+    playSound('rouletteWheel');
     
     // Start the spin immediately and remove owner from queue to prevent double-spins
     setWheelState(prev => {
@@ -1040,6 +1149,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       const idx = Math.floor(random() * updated.length);
       updated.splice(idx, 1);
       discarded += 1;
+      playSound('discard');
     }
     if (discarded) telemetry.push(`${ACTOR_LABEL[ownerKey]} inventory full → discarded ${discarded}`);
     return updated;
@@ -1789,6 +1899,10 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       return nextState;
     });
     
+    // Play gunshot sound - use blank sound for blank shells, gunshot for live shells
+    // Use the isLive variable calculated at the start of the function
+    playSound(isLive ? 'gunshot' : 'blank');
+    
     // Set shot effect outside state update to avoid batching issues and ensure it always triggers
     // Use a small delay to ensure it runs after React processes the state update
     setTimeout(() => {
@@ -1830,6 +1944,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
       while (nextInventory.length > MAX_INVENTORY) {
         nextInventory.shift();
         discarded += 1;
+        playSound('discard');
       }
       if (discarded) telemetry.push(`${ACTOR_LABEL[owner]} inventory full → discarded ${discarded}`);
       const trimmed = nextInventory;
@@ -1896,11 +2011,14 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           } else {
             dealerHealth = newHp;
           }
+          playSound('cigarette');
+          playSound('heal');
           telemetry.push(`${ACTOR_LABEL[actor]}: Cigarettes → HP ${newHp}`);
           break;
         }
         case 'HAND_SAW': {
           tempEffects[actor].doubleDamageNextShot = true;
+          playSound('saw');
           telemetry.push(`${ACTOR_LABEL[actor]}: Hand Saw primed`);
           if (actor === 'player') {
             setEffectOverlay('sawing');
@@ -1913,6 +2031,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           if (remainingShells <= 0) {
             telemetry.push(`${ACTOR_LABEL[actor]}: Glass → chamber empty`);
           } else {
+            playSound('magnifyingGlass');
             knowledge = {
               ...knowledge,
               [actor]: {
@@ -1934,6 +2053,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           if (remainingShells <= 0) {
             telemetry.push(`${ACTOR_LABEL[actor]}: Beer wasted (empty)`);
           } else {
+            playSound('beer');
             const isLive = currentShellType === 'LIVE';
             liveShells = isLive ? prev.liveShells - 1 : prev.liveShells;
             blankShells = !isLive ? prev.blankShells - 1 : prev.blankShells;
@@ -1941,6 +2061,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
             knowledge = freshKnowledge();
             const shellsLeft = prev.chamber.length - currentShellIndex;
             telemetry.push(`${ACTOR_LABEL[actor]}: Beer → racked a shell (${shellsLeft} left)`);
+            // triggerShell will play the bulletEject sound when type is 'side'
             triggerShell('side', isLive ? 'red' : 'white');
           }
           keepTurn = true;
@@ -1948,6 +2069,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
         }
         case 'SKIP': {
           statusEffects[opponent].skipTurnsRemaining += 1;
+          playSound('skip');
           telemetry.push(`${ACTOR_LABEL[actor]}: Skip → ${ACTOR_LABEL[opponent]} loses a turn`);
           break;
         }
@@ -1955,6 +2077,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           // Add shield to block next 1 damage (only if no shield is already active)
           const currentShield = tempEffects[actor]?.shieldNextDamage || 0;
           if (currentShield === 0) {
+            playSound('shield');
             tempEffects[actor] = { ...tempEffects[actor], shieldNextDamage: 1 };
             telemetry.push(`${ACTOR_LABEL[actor]}: Shield → blocked for 1 damage`);
             if (actor === 'player') {
@@ -1973,6 +2096,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           if (opponentItems.length === 0) {
             telemetry.push(`${ACTOR_LABEL[actor]}: Shake Down → ${ACTOR_LABEL[opponent]} has no items!`);
           } else {
+            playSound('discard');
             const idx = Math.floor(random() * opponentItems.length);
             const removedItem = opponentItems[idx];
             const newOpponentInventory = opponentItems.filter((_, i) => i !== idx);
@@ -1993,6 +2117,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           if (stealOpponentItems.length === 0) {
             telemetry.push(`${ACTOR_LABEL[actor]}: Steal → ${ACTOR_LABEL[opponent]} has no items!`);
           } else {
+            playSound('steal');
             const stealIdx = Math.floor(random() * stealOpponentItems.length);
             const stolenItem = stealOpponentItems[stealIdx];
             const newStealOpponentInventory = stealOpponentItems.filter((_, i) => i !== stealIdx);
@@ -2001,6 +2126,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
             // If actor would exceed max, discard oldest to make room
             while (newActorInventory.length > MAX_INVENTORY) {
               newActorInventory.shift();
+              playSound('discard');
               telemetry.push(`${ACTOR_LABEL[actor]}: Inventory full → discarded oldest item`);
             }
             
@@ -2023,6 +2149,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           if (remainingShells <= 0) {
             telemetry.push(`${ACTOR_LABEL[actor]}: Inverter → chamber empty`);
           } else {
+            playSound('invert');
             const oldType = currentShellType;
             const newType = oldType === 'LIVE' ? 'BLANK' : 'LIVE';
             // Modify chamber - create new array with swapped shell
@@ -2048,6 +2175,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
           const isPlayer = actor === 'player';
           if (pillRoll < 0.5) {
             // Heal 2 HP (capped at max)
+            playSound('heal');
             const newHp = clampHp((isPlayer ? playerHealth : dealerHealth) + 2);
             if (isPlayer) {
               playerHealth = newHp;
@@ -2061,6 +2189,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
             }
           } else {
             // Take 1 damage
+            playSound('healDamage');
             const newHp = clampHp((isPlayer ? playerHealth : dealerHealth) - 1);
             if (isPlayer) {
               playerHealth = newHp;
@@ -2165,12 +2294,14 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
   };
 
   const handleShootSelf = () => {
+    playSound('uiClick');
     setSuppressHoverAim(true);
     setAimingAt('self');
     setTimeout(() => setSuppressHoverAim(false), 2000);
     resolveShot('player', 'player');
   };
   const handleShootDealer = () => {
+    playSound('uiClick');
     setSuppressHoverAim(true);
     setAimingAt('dealer');
     setTimeout(() => setSuppressHoverAim(false), 2000);
@@ -2178,6 +2309,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
   };
   const handleUseItem = (item) => {
     if (!item) return;
+    playSound('uiClick');
     // Clear hover state immediately when item is used
     if (hoverTimeoutRef.current) {
       clearTimeout(hoverTimeoutRef.current);
@@ -2649,6 +2781,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
           <div className="z-20 w-full max-w-sm flex flex-col gap-4 animate-in slide-in-from-bottom-12 duration-1000 delay-200 pointer-events-auto">
              <MenuButton 
+               playSound={playSound}
                onClick={() => {
                  // If wallet is connected, proceed to betting
                  if (isConnected && address) {
@@ -2664,9 +2797,9 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                label="Play" 
                primary 
              />
-             <MenuButton onClick={() => {}} icon={<Swords className="w-5 h-5"/>} label="PvP (Soon)" />
-             <MenuButton onClick={() => setShowProfile(true)} icon={<User className="w-5 h-5"/>} label="Profile" />
-             <MenuButton onClick={() => setShowHowToPlay(true)} icon={<HelpCircle className="w-5 h-5"/>} label="How to Play" />
+             <MenuButton playSound={playSound} onClick={() => {}} icon={<Swords className="w-5 h-5"/>} label="PvP (Soon)" />
+             <MenuButton playSound={playSound} onClick={() => setShowProfile(true)} icon={<User className="w-5 h-5"/>} label="Profile" />
+             <MenuButton playSound={playSound} onClick={() => setShowHowToPlay(true)} icon={<HelpCircle className="w-5 h-5"/>} label="How to Play" />
           </div>
 
           {/* Footer Controls */}
@@ -2674,7 +2807,10 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
              {/* Volume Control */}
              <div className="flex items-center gap-4 group">
                 <button 
-                  onClick={() => setIsMuted(!isMuted)} 
+                  onClick={() => {
+                    playSound('uiClick');
+                    setIsMuted(!isMuted);
+                  }} 
                   className="hover:text-red-500 transition-colors"
                 >
                    {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
@@ -2703,14 +2839,20 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
              {/* Social Links */}
              <div className="flex gap-6">
                 <button 
-                  onClick={() => window.open('https://discord.gg/B9W64gZjQG', '_blank', 'noopener,noreferrer')}
+                  onClick={() => {
+                    playSound('uiClick');
+                    window.open('https://discord.gg/B9W64gZjQG', '_blank', 'noopener,noreferrer');
+                  }}
                   className="hover:text-[#5865F2] hover:scale-110 transition-all duration-200"
                   aria-label="Discord"
                 >
                   <DiscordIcon className="w-6 h-6" />
                 </button>
                 <button 
-                  onClick={() => window.open('https://x.com/KshitijGajapure', '_blank', 'noopener,noreferrer')}
+                  onClick={() => {
+                    playSound('uiClick');
+                    window.open('https://x.com/KshitijGajapure', '_blank', 'noopener,noreferrer');
+                  }}
                   className="hover:text-white hover:scale-110 transition-all duration-200"
                   aria-label="Twitter"
                 >
@@ -2766,18 +2908,24 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
 
                   <div className="flex gap-4">
                     <button 
-                        onClick={() => setCryptoState(p => ({...p, phase: 'main_menu'}))}
+                        onClick={() => {
+                          playSound('uiClick');
+                          setCryptoState(p => ({...p, phase: 'main_menu'}));
+                        }}
                         disabled={entropyStatus === 'requesting' || entropyStatus === 'waiting'}
                         className={`flex-1 py-4 bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-400 font-bold tracking-[0.2em] uppercase transition-all duration-300 text-xs ${
                           (entropyStatus === 'requesting' || entropyStatus === 'waiting') 
                             ? 'opacity-50 cursor-not-allowed' 
                             : ''
                         }`}
-                    >
+                      >
                         Back
                     </button>
                     <button 
-                        onClick={handleStartGame}
+                        onClick={() => {
+                          playSound('uiClick');
+                          handleStartGame();
+                        }}
                         disabled={isContractLoading || !contractRef.current || !CONTRACT_CONFIG.address || CONTRACT_CONFIG.address === '0x0000000000000000000000000000000000000000'}
                         className="flex-[3] min-w-[200px] py-4 bg-red-900/20 border border-red-500/50 hover:bg-red-900/40 hover:border-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-red-500 font-black tracking-[0.2em] uppercase transition-all duration-300 group whitespace-nowrap"
                     >
@@ -2900,7 +3048,10 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                   <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
                     {/* RNG Verification Button - Always shown, disabled until data is fetched */}
                     <button
-                      onClick={() => rngVerificationData && setShowRNGVerification(true)}
+                      onClick={() => {
+                        playSound('uiClick');
+                        if (rngVerificationData) setShowRNGVerification(true);
+                      }}
                       disabled={!rngVerificationData}
                       className={`group relative px-8 py-4 border transition-all duration-300 overflow-hidden ${
                         rngVerificationData 
@@ -2929,6 +3080,7 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                     
                     <button 
                       onClick={() => {
+                          playSound('uiClick');
                           setCryptoState(prev => ({ ...prev, currentWager: 0, phase: 'main_menu', multiplier: 1.0 })); // Reset to main menu
                           setGameState(prev => ({
                             ...createInitialGameState(rngSeedRef.current),
@@ -3434,7 +3586,10 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
             ) : (
                 wheelState.currentOwner === 'player' && !wheelState.spinning && (
                     <button 
-                        onClick={() => spinWheel('player')}
+                        onClick={() => {
+                          playSound('uiClick');
+                          spinWheel('player');
+                        }}
                         className="group relative px-6 sm:px-8 md:px-12 py-3 sm:py-4 md:py-5 bg-zinc-900 border border-zinc-700 text-zinc-300 text-xs sm:text-sm font-black uppercase tracking-[0.2em] sm:tracking-[0.25em] hover:border-red-500 hover:text-red-400 transition-all active:scale-95 hover:shadow-[0_0_20px_rgba(220,38,38,0.3)]"
                     >
                         SPIN
@@ -3816,7 +3971,10 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                 <h2 className="text-xl font-black tracking-[0.15em] uppercase text-white">Profile</h2>
               </div>
               <button 
-                onClick={() => setShowProfile(false)}
+                onClick={() => {
+                  playSound('uiClick');
+                  setShowProfile(false);
+                }}
                 className="p-2 hover:bg-zinc-800 rounded-lg transition-colors text-zinc-400 hover:text-white"
               >
                 <X className="w-5 h-5" />
@@ -3852,7 +4010,10 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
             {/* Footer */}
             <div className="border-t border-zinc-800 px-6 py-4">
               <button 
-                onClick={() => setShowProfile(false)}
+                onClick={() => {
+                  playSound('uiClick');
+                  setShowProfile(false);
+                }}
                 className="w-full py-3 bg-red-600 hover:bg-red-500 text-white font-bold uppercase tracking-widest text-sm transition-all rounded"
               >
                 Close
@@ -3873,7 +4034,10 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
                 <h2 className="text-xl font-black tracking-[0.15em] uppercase text-white">How to Play</h2>
               </div>
               <button 
-                onClick={() => setShowHowToPlay(false)}
+                onClick={() => {
+                  playSound('uiClick');
+                  setShowHowToPlay(false);
+                }}
                 className="p-2 hover:bg-zinc-800 rounded-lg transition-colors text-zinc-400 hover:text-white"
               >
                 <X className="w-5 h-5" />
@@ -3984,7 +4148,10 @@ const addItemsToInventory = (inventory, ownerKey, telemetry, count) => {
             {/* Footer */}
             <div className="sticky bottom-0 bg-zinc-900 border-t border-zinc-800 px-6 py-4">
               <button 
-                onClick={() => setShowHowToPlay(false)}
+                onClick={() => {
+                  playSound('uiClick');
+                  setShowHowToPlay(false);
+                }}
                 className="w-full py-3 bg-red-600 hover:bg-red-500 text-white font-bold uppercase tracking-widest text-sm transition-all rounded"
               >
                 Got it!
